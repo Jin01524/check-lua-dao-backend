@@ -54,9 +54,17 @@ router.post('/register', async (req, res) => {
     return res.status(500).json({ error: 'Đăng ký tài khoản thất bại' });
   }
 
+  // Generate User token
+  const token = jwt.sign(
+    { username: newUser.username, role: newUser.role, id: newUser.id },
+    process.env.JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+
   res.status(201).json({
     message: 'Đăng ký tài khoản thành công',
-    user: newUser,
+    token,
+    user: { username: newUser.username, role: newUser.role },
   });
 });
 
