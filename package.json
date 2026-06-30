@@ -1,0 +1,29 @@
+{
+  "name": "checkluadao-backend",
+  "version": "1.0.0",
+  "description": "Backend API cho ứng dụng kiểm tra tin nhắn lừa đảo, sử dụng Node.js + Express + Supabase + Google Gemini AI.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "setup": "node setup.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^2.10.0",
+    "@supabase/supabase-js": "^2.110.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.2",
+    "express-async-errors": "^3.1.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
