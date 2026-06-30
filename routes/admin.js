@@ -62,17 +62,17 @@ router.post('/api-keys', async (req, res) => {
 });
 
 /**
- * PUT /api/admin/api-keys/:id
+ * PATCH /api/admin/api-keys/:id
  * Sửa API key (toggle is_active, sửa label)
- * Body: { is_active?, label? }
+ * Body: { isActive?, label? }
  */
-router.put('/api-keys/:id', async (req, res) => {
+router.patch('/api-keys/:id', async (req, res) => {
   const supabase = getSupabaseClient();
   const { id } = req.params;
-  const { is_active, label } = req.body;
+  const { isActive, label } = req.body;
 
   const updateFields = {};
-  if (typeof is_active === 'boolean') updateFields.is_active = is_active;
+  if (typeof isActive === 'boolean') updateFields.is_active = isActive;
   if (label !== undefined) updateFields.label = label;
 
   if (Object.keys(updateFields).length === 0) {
@@ -93,6 +93,29 @@ router.put('/api-keys/:id', async (req, res) => {
     return res.status(500).json({ error: 'Failed to update API key' });
   }
 
+  res.json({ message: 'API key updated', data });
+});
+
+// Giữ lại PUT làm fallback
+router.put('/api-keys/:id', async (req, res) => {
+  const supabase = getSupabaseClient();
+  const { id } = req.params;
+  const { is_active, label } = req.body;
+  const { isActive } = req.body;
+
+  const updateFields = {};
+  const activeStatus = typeof isActive === 'boolean' ? isActive : is_active;
+  if (typeof activeStatus === 'boolean') updateFields.is_active = activeStatus;
+  if (label !== undefined) updateFields.label = label;
+
+  const { data, error } = await supabase
+    .from('api_keys')
+    .update(updateFields)
+    .eq('id', id)
+    .select('id, label, is_active, created_at')
+    .single();
+
+  if (error) return res.status(500).json({ error: 'Failed to update API key' });
   res.json({ message: 'API key updated', data });
 });
 
@@ -148,10 +171,35 @@ router.get('/templates', async (req, res) => {
 });
 
 /**
- * PUT /api/admin/templates/:id
+ * PATCH /api/admin/templates/:id/approve
+ * Phê duyệt mẫu tin nhắn lừa đảo
+ */
+router.patch('/templates/:id/approve', async (req, res) => {
+  const supabase = getSupabaseClient();
+  const { id } = req.params;
+
+  const { data, error } = await supabase
+    .from('scam_templates')
+    .update({ is_approved: true })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+    return res.status(500).json({ error: 'Failed to approve template' });
+  }
+
+  res.json({ message: 'Template approved successfully', data });
+});
+
+/**
+ * PATCH /api/admin/templates/:id
  * Sửa mẫu (title, analysis, messages_json, is_approved, scam_type)
  */
-router.put('/templates/:id', async (req, res) => {
+router.patch('/templates/:id', async (req, res) => {
   const supabase = getSupabaseClient();
   const { id } = req.params;
   const { title, analysis, messages_json, is_approved, scam_type, platform } = req.body;
@@ -182,6 +230,34 @@ router.put('/templates/:id', async (req, res) => {
     return res.status(500).json({ error: 'Failed to update template' });
   }
 
+  res.json({ message: 'Template updated', data });
+});
+
+/**
+ * PUT /api/admin/templates/:id
+ * Giữ lại làm fallback
+ */
+router.put('/templates/:id', async (req, res) => {
+  const supabase = getSupabaseClient();
+  const { id } = req.params;
+  const { title, analysis, messages_json, is_approved, scam_type, platform } = req.body;
+
+  const updateFields = {};
+  if (title !== undefined) updateFields.title = title;
+  if (analysis !== undefined) updateFields.analysis = analysis;
+  if (messages_json !== undefined) updateFields.messages_json = messages_json;
+  if (typeof is_approved === 'boolean') updateFields.is_approved = is_approved;
+  if (scam_type !== undefined) updateFields.scam_type = scam_type;
+  if (platform !== undefined) updateFields.platform = platform;
+
+  const { data, error } = await supabase
+    .from('scam_templates')
+    .update(updateFields)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: 'Failed to update template' });
   res.json({ message: 'Template updated', data });
 });
 
