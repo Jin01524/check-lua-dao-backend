@@ -75,7 +75,7 @@ TRẢ VỀ DUY NHẤT một JSON object hợp lệ, không có text thừa, khô
 
   // ── Call Gemini API ────────────────────────────────────────────────────────
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-lite',
+    model: 'gemini-2.5-flash',
     contents: [
       {
         role: 'user',
