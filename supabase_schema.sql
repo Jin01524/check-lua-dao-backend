@@ -29,15 +29,12 @@ CREATE INDEX IF NOT EXISTS idx_scam_templates_is_approved ON scam_templates(is_a
 CREATE INDEX IF NOT EXISTS idx_scam_templates_platform ON scam_templates(platform);
 CREATE INDEX IF NOT EXISTS idx_api_keys_is_active ON api_keys(is_active);
 
--- Row Level Security (RLS) - Tùy chọn, có thể bỏ qua nếu dùng service role key
-ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE scam_templates ENABLE ROW LEVEL SECURITY;
+-- Tắt RLS để service role key có thể truy cập toàn bộ không bị chặn
+ALTER TABLE api_keys DISABLE ROW LEVEL SECURITY;
+ALTER TABLE scam_templates DISABLE ROW LEVEL SECURITY;
 
--- Policy: Service role bypass all RLS
-CREATE POLICY "Service role full access on api_keys"
-  ON api_keys FOR ALL
-  USING (true);
+-- Thêm API Key Gemini mặc định nếu chưa có
+INSERT INTO api_keys (key, label, is_active)
+SELECT 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ', 'Gemini Key Mặc định', true
+WHERE NOT EXISTS (SELECT 1 FROM api_keys WHERE key = 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ');
 
-CREATE POLICY "Service role full access on scam_templates"
-  ON scam_templates FOR ALL
-  USING (true);

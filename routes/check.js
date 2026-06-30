@@ -88,6 +88,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     analysisResult = await analyzeImages(req.files, platform, geminiApiKey, fewShotExamples);
   } catch (err) {
     console.error('[Check] Gemini analysis error:', err.message);
+    console.error('[Check] Stack:', err.stack);
     return res.status(500).json({ error: `Analysis failed: ${err.message}` });
   }
 

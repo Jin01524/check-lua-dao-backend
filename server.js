@@ -99,7 +99,8 @@ app.use((_req, res) => {
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
-  console.error('[ERROR]', err.message || err);
+  console.error('[ERROR] Message:', err.message || err);
+  console.error('[ERROR] Stack:', err.stack);
   const status = err.status || err.statusCode || 500;
   res.status(status).json({ error: err.message || 'Internal server error' });
 });
