@@ -153,7 +153,7 @@ router.get('/templates', async (req, res) => {
 
   let query = supabase
     .from('scam_templates')
-    .select('id, title, platform, scam_type, is_approved, created_at')
+    .select('*')
     .order('created_at', { ascending: false })
     .range(Number(offset), Number(offset) + Number(limit) - 1);
 

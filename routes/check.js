@@ -40,23 +40,28 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   const platform = req.body.platform || 'Không xác định';
 
   // ── Lấy API key active từ Supabase ───────────────────────────────────────
-  const { data: apiKeyData, error: apiKeyError } = await supabase
+  const { data: allKeys, error: dbError } = await supabase
     .from('api_keys')
-    .select('id, key')
-    .eq('is_active', true)
-    .limit(1)
-    .single();
+    .select('key, is_active');
 
-  // Nếu không tìm thấy API key trong DB, dùng từ .env
-  let geminiApiKey = process.env.GEMINI_API_KEY;
-  if (!apiKeyError && apiKeyData) {
-    geminiApiKey = apiKeyData.key;
+  let geminiApiKey = null;
+
+  if (!dbError && allKeys && allKeys.length > 0) {
+    const activeKey = allKeys.find(k => k.is_active);
+    if (activeKey) {
+      geminiApiKey = activeKey.key;
+    } else {
+      return res.status(500).json({ error: 'Tất cả API key đã bị quản trị viên tắt' });
+    }
   } else {
-    console.warn('[Check] No active API key in DB, using GEMINI_API_KEY from .env');
+    geminiApiKey = process.env.GEMINI_API_KEY;
+    if (geminiApiKey) {
+      console.warn('[Check] No keys in DB, using fallback GEMINI_API_KEY from .env');
+    }
   }
 
   if (!geminiApiKey) {
-    return res.status(500).json({ error: 'No Gemini API key configured' });
+    return res.status(500).json({ error: 'Hệ thống chưa được cấu hình API key hoạt động' });
   }
 
   // ── Lấy 1-2 mẫu few-shot từ DB (ưu tiên cùng platform) ──────────────────

@@ -24,17 +24,29 @@ CREATE TABLE IF NOT EXISTS scam_templates (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Bảng lưu tài khoản người dùng
+CREATE TABLE IF NOT EXISTS users (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT DEFAULT 'user',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Index để query nhanh hơn
 CREATE INDEX IF NOT EXISTS idx_scam_templates_is_approved ON scam_templates(is_approved);
 CREATE INDEX IF NOT EXISTS idx_scam_templates_platform ON scam_templates(platform);
 CREATE INDEX IF NOT EXISTS idx_api_keys_is_active ON api_keys(is_active);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- Tắt RLS để service role key có thể truy cập toàn bộ không bị chặn
 ALTER TABLE api_keys DISABLE ROW LEVEL SECURITY;
 ALTER TABLE scam_templates DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 
 -- Thêm API Key Gemini mặc định nếu chưa có
 INSERT INTO api_keys (key, label, is_active)
 SELECT 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ', 'Gemini Key Mặc định', true
 WHERE NOT EXISTS (SELECT 1 FROM api_keys WHERE key = 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ');
+
 
