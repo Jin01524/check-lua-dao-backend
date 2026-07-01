@@ -20,11 +20,13 @@ const CANNY_HIGH = 28;   // ngưỡng cao Canny
 
 // ── Tiêu chí phân loại ────────────────────────────────────────────────────
 // Phải thỏa MỌI điều kiện sau:
-const MIN_H_LINES = 2;   // ít nhất 2 "đường ngang" (nhóm liên tục các hàng edge cao)
-const MAX_H_LINES = 50;  // quá nhiều → ảnh dày đặc chi tiết (không phải screenshot UI)
-const MIN_BANDS   = 2;   // ≥2 vùng nội dung phân tách bởi khoảng trắng thực sự
-const H_THRESH    = 0.07; // hàng có ≥7% pixel edge = "hàng có nội dung"
-const GAP_MIN     = 4;   // khoảng trắng ≥4 hàng mới tính là ranh giới thực giữa 2 bubble
+const MIN_H_LINES       = 2;    // ít nhất 2 "đường ngang" (nhóm liên tục các hàng edge cao)
+const MAX_H_LINES       = 50;   // quá nhiều → ảnh dày đặc chi tiết (không phải screenshot UI)
+const MIN_BANDS         = 3;    // ≥3 vùng nội dung = ít nhất 3 bong bóng tin nhắn
+const MAX_BAND_H_RATIO  = 0.38; // band cao nhất không vượt quá 38% chiều cao ảnh
+                                 // (bong bóng chat nhỏ; ảnh quạt có band 40-50%)
+const H_THRESH          = 0.07; // hàng có ≥7% pixel edge = "hàng có nội dung"
+const GAP_MIN           = 4;    // khoảng trắng ≥4 hàng mới tính là ranh giới thực giữa 2 bubble
 
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -127,25 +129,26 @@ function countHorizontalLines(densities) {
 
 /**
  * Đếm số "vùng nội dung" phân tách bởi khoảng trắng thực sự (≥ GAP_MIN hàng edge thấp).
- *
- * Khác với countHorizontalLines ở chỗ: khoảng trắng ngắn (1-3 hàng) không tính là ranh giới.
- * Chỉ khoảng trắng thực sự (≥ GAP_MIN hàng) mới tách 2 bubble ra.
- *
- * Chat screenshot (ảnh SMS này): gap giữa bubble = 5-20 hàng → bands ≥ 2 ✓
- * Ảnh chụp thật: thường là 1 vùng liên tục → bands = 1 ✗
+ * Cũng tính chiều cao của band lớn nhất để loại ảnh có vùng quá cao (không phải chat).
  */
-function countEdgeBands(densities) {
+function countEdgeBands(densities, totalRows) {
   let bands = 0, gapLen = 0, inBand = false;
+  let bandHeight = 0, maxBandHeight = 0;
+
   for (const d of densities) {
     if (d >= H_THRESH) {
-      if (!inBand) { bands++; inBand = true; }
+      if (!inBand) { bands++; inBand = true; bandHeight = 0; }
+      bandHeight++;
+      maxBandHeight = Math.max(maxBandHeight, bandHeight);
       gapLen = 0;
     } else {
       gapLen++;
-      if (gapLen >= GAP_MIN) inBand = false; // khoảng trắng đủ lớn → ranh giới thực
+      if (gapLen >= GAP_MIN) { inBand = false; }
     }
   }
-  return bands;
+
+  const maxBandRatio = totalRows > 0 ? maxBandHeight / totalRows : 0;
+  return { bands, maxBandRatio };
 }
 
 /**
@@ -172,11 +175,11 @@ export async function detectChatStructure(imageBuffer) {
   const edges = doubleThreshold(nms, w, h, CANNY_LOW, CANNY_HIGH);
 
   // ── Bước 6: Phân tích cấu trúc ────────────────────────────────────
-  const densities = rowEdgeDensities(edges, w, h);
-  const hLines    = countHorizontalLines(densities);
-  const bands     = countEdgeBands(densities);
+  const densities                 = rowEdgeDensities(edges, w, h);
+  const hLines                    = countHorizontalLines(densities);
+  const { bands, maxBandRatio }   = countEdgeBands(densities, h);
 
-  console.log(`[CV] ${w}×${h}px | hLines=${hLines} | bands=${bands}`);
+  console.log(`[CV] ${w}×${h}px | hLines=${hLines} | bands=${bands} | maxBandRatio=${maxBandRatio.toFixed(2)}`);
 
   let valid  = true;
   let reason = '';
@@ -189,8 +192,11 @@ export async function detectChatStructure(imageBuffer) {
     reason = 'Ảnh có quá nhiều chi tiết phức tạp – có vẻ là ảnh chụp thật chứ không phải screenshot. Vui lòng gửi ảnh chụp màn hình tin nhắn.';
   } else if (bands < MIN_BANDS) {
     valid  = false;
-    reason = 'Không phát hiện đủ vùng tin nhắn phân tách rõ ràng. Vui lòng chụp màn hình bao gồm nhiều tin nhắn.';
+    reason = 'Không phát hiện đủ bong bóng tin nhắn (cần ít nhất 3). Vui lòng chụp màn hình bao gồm nhiều tin nhắn hơn.';
+  } else if (maxBandRatio > MAX_BAND_H_RATIO) {
+    valid  = false;
+    reason = 'Ảnh có vùng nội dung quá lớn – có vẻ là ảnh chụp thật chứ không phải screenshot tin nhắn.';
   }
 
-  return { valid, reason, hLines, bands };
+  return { valid, reason, hLines, bands, maxBandRatio: +maxBandRatio.toFixed(2) };
 }
