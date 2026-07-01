@@ -53,20 +53,25 @@ Người dùng đã gửi ${imageFiles.length} ảnh chụp màn hình tin nhắ
 Các ảnh có thể bị thiếu hoặc thứ tự lộn xộn - hãy sắp xếp lại theo trình tự thời gian hợp lý.
 ${fewShotSection}
 Nhiệm vụ của bạn:
-1. Phân tích toàn bộ ảnh, sắp xếp lại cuộc hội thoại theo đúng thứ tự.
-2. Xác định đây có phải tin nhắn lừa đảo không.
-3. Nếu là lừa đảo: trích xuất toàn bộ nội dung tin nhắn.
-   QUAN TRỌNG: Thay thế số điện thoại, số tài khoản ngân hàng, địa chỉ nhà cụ thể bằng 'xxxx'.
-4. Đặt tiêu đề mô tả loại hình lừa đảo bằng tiếng Việt.
-5. Phân tích các dấu hiệu nhận biết bằng tiếng Việt thông dụng, dễ hiểu.
+1. Xác định xem ảnh tải lên có phải là ảnh chụp màn hình tin nhắn/giao diện trò chuyện (chat screenshot) hay không.
+   Nếu KHÔNG phải là ảnh chụp màn hình tin nhắn (ví dụ: ảnh chụp phong cảnh, đồ vật, người, quạt điện, v.v.), hãy đặt "isChatScreenshot": false, "isScam": false, "scamType": null, "title": null, "confidenceScore": 0, "messages": [], "warningPoints": [], và viết phân tích giải thích lý do cụ thể trong trường "analysis".
+2. Nếu ĐÚNG là ảnh chụp màn hình tin nhắn:
+   - Đặt "isChatScreenshot": true.
+   - Phân tích toàn bộ ảnh, sắp xếp lại cuộc hội thoại theo đúng thứ tự.
+   - Xác định đây có phải tin nhắn lừa đảo không.
+   - Nếu là lừa đảo: trích xuất toàn bộ nội dung tin nhắn.
+     QUAN TRỌNG: Thay thế số điện thoại, số tài khoản ngân hàng, địa chỉ nhà cụ thể bằng 'xxxx'.
+   - Đặt tiêu đề mô tả loại hình lừa đảo bằng tiếng Việt.
+   - Phân tích các dấu hiệu nhận biết bằng tiếng Việt thông dụng, dễ hiểu.
 
 TRẢ VỀ DUY NHẤT một JSON object hợp lệ, không có text thừa, không có markdown code block:
 {
+  "isChatScreenshot": true hoặc false,
   "isScam": true hoặc false,
   "scamType": "tên loại hình lừa đảo hoặc null",
   "title": "Tiêu đề mẫu tin nhắn hoặc null",
   "confidenceScore": số từ 0-100,
-  "analysis": "Phân tích chi tiết bằng ngôn ngữ đơn giản dễ hiểu",
+  "analysis": "Phân tích chi tiết bằng ngôn ngữ đơn giản dễ hiểu hoặc thông báo nếu không phải ảnh chat",
   "warningPoints": ["dấu hiệu 1", "dấu hiệu 2"],
   "messages": [
     {"sender": "scammer" hoặc "user" hoặc "unknown", "text": "nội dung tin nhắn"}
@@ -75,7 +80,7 @@ TRẢ VỀ DUY NHẤT một JSON object hợp lệ, không có text thừa, khô
 
   // ── Call Gemini API ────────────────────────────────────────────────────────
   const response = await ai.models.generateContent({
-    model: 'gemini-3.1-flash-lite',
+    model: 'gemini-2.5-flash',
     contents: [
       {
         role: 'user',
@@ -102,6 +107,7 @@ TRẢ VỀ DUY NHẤT một JSON object hợp lệ, không có text thừa, khô
     }
 
     return {
+      isChatScreenshot: typeof parsed.isChatScreenshot === 'boolean' ? parsed.isChatScreenshot : true,
       isScam: parsed.isScam,
       scamType: parsed.scamType || null,
       title: parsed.title || null,

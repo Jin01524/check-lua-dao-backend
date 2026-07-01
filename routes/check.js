@@ -140,7 +140,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
 
   // ── Nếu là lừa đảo: lưu vào DB (pending approval) ────────────────────────
   let savedTemplateId = null;
-  if (analysisResult.isScam && analysisResult.title) {
+  if (analysisResult.isChatScreenshot && analysisResult.isScam && analysisResult.title) {
     const { data: savedTemplate, error: saveError } = await supabase
       .from('scam_templates')
       .insert({
