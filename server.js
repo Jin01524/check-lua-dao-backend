@@ -53,6 +53,7 @@ import authRoutes from './routes/auth.js';
 import checkRoutes from './routes/check.js';
 import templatesRoutes from './routes/templates.js';
 import adminRoutes from './routes/admin.js';
+import validateImageRoutes from './routes/validateImage.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -85,6 +86,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/check', checkRoutes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/validate-image', validateImageRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
