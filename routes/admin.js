@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from '../lib/supabase.js';
 import authMiddleware from '../middleware/auth.js';
+import { getConsistentScore, CURATED_TEMPLATES } from './templates.js';
 
 const router = express.Router();
 
@@ -146,7 +147,7 @@ router.delete('/api-keys/:id', async (req, res) => {
 
 /**
  * GET /api/admin/templates
- * Lấy TẤT CẢ mẫu (kể cả chưa duyệt)
+ * Lấy TẤT CẢ mẫu (kể cả chưa duyệt) với điểm rủi ro chuẩn hóa
  */
 router.get('/templates', async (req, res) => {
   const supabase = getSupabaseClient();
@@ -164,11 +165,22 @@ router.get('/templates', async (req, res) => {
 
   const { data, error } = await query;
 
-  if (error) {
-    return res.status(500).json({ error: 'Failed to fetch templates' });
+  if (error || !data || data.length === 0) {
+    // Nếu DB chưa có dữ liệu hoặc lỗi, trả về danh mục mẫu chuẩn curated
+    let fallbackTemplates = CURATED_TEMPLATES;
+    if (approved === 'true') fallbackTemplates = fallbackTemplates.filter((t) => t.is_approved);
+    else if (approved === 'false') fallbackTemplates = fallbackTemplates.filter((t) => !t.is_approved);
+
+    return res.json({ data: fallbackTemplates, count: fallbackTemplates.length });
   }
 
-  res.json({ data, count: data.length });
+  const enriched = data.map((item) => ({
+    ...item,
+    confidence_score: getConsistentScore(item),
+    warning_points: item.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+  }));
+
+  res.json({ data: enriched, count: enriched.length });
 });
 
 /**

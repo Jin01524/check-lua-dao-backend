@@ -97,7 +97,7 @@ export const CURATED_TEMPLATES = [
     title: 'Cảnh báo khóa thuê bao sau 2 giờ của Cục Viễn thông để cướp SIM',
     platform: 'SMS',
     scam_type: 'Lừa đảo cướp quyền kiểm soát SIM điện thoại',
-    confidence_score: 90,
+    confidence_score: 93,
     analysis: 'Tin nhắn mạo danh Cục Viễn thông thông báo thuê bao chưa chuẩn hóa thông tin và sẽ bị khóa sau 2 giờ. Kẻ lừa đảo hướng dẫn soạn tin nhắn đổi SIM sang e-SIM hoặc gọi số tổng đài giả để chiếm quyền kiểm soát số điện thoại, từ đó nhận OTP rút tiền tài khoản ngân hàng.',
     warning_points: [
       'Đe dọa khóa SIM một chiều hoặc hai chiều trong thời gian cực ngắn (2 giờ)',

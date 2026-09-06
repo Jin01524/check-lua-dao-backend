@@ -77,4 +77,13 @@ VALUES ('admin', '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm',
 ON CONFLICT (username)
 DO UPDATE SET password_hash = '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', password_display = '123456', role = 'admin', is_active = true;
 
+-- Cập nhật điểm rủi ro chuẩn cho các mẫu cũ nếu bị gán mặc định 90
+UPDATE scam_templates SET confidence_score = 98 WHERE title ILIKE '%Vietcombank%';
+UPDATE scam_templates SET confidence_score = 96 WHERE title ILIKE '%Công an%';
+UPDATE scam_templates SET confidence_score = 94 WHERE title ILIKE '%Cộng tác viên%' OR title ILIKE '%Shopee%';
+UPDATE scam_templates SET confidence_score = 97 WHERE title ILIKE '%Thuế%' OR title ILIKE '%Trojan%';
+UPDATE scam_templates SET confidence_score = 93 WHERE title ILIKE '%khóa thuê bao%' OR title ILIKE '%SIM%';
+UPDATE scam_templates SET confidence_score = 92 WHERE title ILIKE '%trúng thưởng%' OR title ILIKE '%Honda SH%';
+
+
 
