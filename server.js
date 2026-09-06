@@ -50,24 +50,47 @@ if (!hashIsValid) {
 
 import authRoutes from './routes/auth.js';
 import checkRoutes from './routes/check.js';
-import templatesRoutes from './routes/templates.js';
+import templatesRoutes, { CURATED_TEMPLATES } from './routes/templates.js';
 import adminRoutes from './routes/admin.js';
 import statsRoutes from './routes/stats.js';
 import { getSupabaseClient } from './lib/supabase.js';
 
-// Auto-seed admin user in users table if Supabase is connected
+// Auto-seed admin user and curated templates in Supabase if connected
 (async () => {
   try {
     const supabase = getSupabaseClient();
     const adminHash = process.env.ADMIN_PASSWORD_HASH || await bcrypt.hash('123456', 10);
-    const { error } = await supabase
+    const { error: userErr } = await supabase
       .from('users')
       .upsert(
         { username: 'admin', password_hash: adminHash, role: 'admin' },
         { onConflict: 'username' }
       );
-    if (!error) {
+    if (!userErr) {
       console.log('[Startup] ✅ Admin user ensured in Supabase database (username: admin, role: admin)');
+    }
+
+    // Check if scam_templates has any templates
+    const { count, error: countErr } = await supabase
+      .from('scam_templates')
+      .select('*', { count: 'exact', head: true });
+
+    if (!countErr && (count === 0 || count === null)) {
+      console.log('[Startup] Seeding curated threat templates into scam_templates...');
+      for (const tpl of CURATED_TEMPLATES) {
+        await supabase
+          .from('scam_templates')
+          .insert({
+            title: tpl.title,
+            platform: tpl.platform,
+            scam_type: tpl.scam_type,
+            analysis: tpl.analysis,
+            messages_json: tpl.messages_json,
+            is_approved: true,
+          })
+          .catch(() => {});
+      }
+      console.log('[Startup] ✅ Curated threat templates seeded successfully');
     }
   } catch (e) {
     // Graceful silent skip if Supabase not yet configured locally
