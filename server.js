@@ -12,8 +12,8 @@ dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Auto-generate bcrypt hash if needed ─────────────────────────────────────
-// Kiểm tra và generate bcrypt hash cho admin password khi startup
-const DEFAULT_ADMIN_PASSWORD = 'admin@checkluadao2024';
+// Kiểm tra và generate bcrypt hash cho admin password (123456) khi startup
+const DEFAULT_ADMIN_PASSWORD = '123456';
 const BCRYPT_REGEX = /^\$2[ab]?\$\d{2}\$.{53}$/;
 
 const existingHash = process.env.ADMIN_PASSWORD_HASH || '';
@@ -28,14 +28,14 @@ if (BCRYPT_REGEX.test(existingHash)) {
 }
 
 if (!hashIsValid) {
-  console.log('[Startup] Generating bcrypt hash for admin password...');
+  console.log('[Startup] Generating bcrypt hash for admin password (123456)...');
   const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   process.env.ADMIN_PASSWORD_HASH = hash;
 
   // Ghi vào .env để lần sau không cần generate lại
   try {
     const envPath = path.join(__dirname, '.env');
-    let envContent = fs.readFileSync(envPath, 'utf-8');
+    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
     if (envContent.includes('ADMIN_PASSWORD_HASH=')) {
       envContent = envContent.replace(/ADMIN_PASSWORD_HASH=.*/, `ADMIN_PASSWORD_HASH=${hash}`);
     } else {
@@ -48,11 +48,31 @@ if (!hashIsValid) {
   }
 }
 
-
 import authRoutes from './routes/auth.js';
 import checkRoutes from './routes/check.js';
 import templatesRoutes from './routes/templates.js';
 import adminRoutes from './routes/admin.js';
+import statsRoutes from './routes/stats.js';
+import { getSupabaseClient } from './lib/supabase.js';
+
+// Auto-seed admin user in users table if Supabase is connected
+(async () => {
+  try {
+    const supabase = getSupabaseClient();
+    const adminHash = process.env.ADMIN_PASSWORD_HASH || await bcrypt.hash('123456', 10);
+    const { error } = await supabase
+      .from('users')
+      .upsert(
+        { username: 'admin', password_hash: adminHash, role: 'admin' },
+        { onConflict: 'username' }
+      );
+    if (!error) {
+      console.log('[Startup] ✅ Admin user ensured in Supabase database (username: admin, role: admin)');
+    }
+  } catch (e) {
+    // Graceful silent skip if Supabase not yet configured locally
+  }
+})();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -85,6 +105,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/check', checkRoutes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/stats', statsRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {

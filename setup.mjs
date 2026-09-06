@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const ADMIN_PASSWORD = 'admin@checkluadao2024';
+const ADMIN_PASSWORD = '123456';
 const ENV_FILE = path.join(__dirname, '.env');
 
 console.log('🔑 Generating bcrypt hash for admin password...');
