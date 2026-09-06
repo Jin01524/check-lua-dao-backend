@@ -154,6 +154,27 @@ function filterCurated(platform, search) {
 }
 
 /**
+ * Hàm tạo điểm rủi ro nhất quán từ 91% - 98% nếu thiếu dữ liệu trong DB
+ */
+export function getConsistentScore(tpl) {
+  if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
+    const s = Number(tpl.confidence_score);
+    return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
+  }
+  if (tpl?.danger_level != null && !isNaN(Number(tpl.danger_level))) {
+    const s = Number(tpl.danger_level);
+    return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
+  }
+  const str = String(tpl?.id || tpl?.title || 'template');
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return 91 + (Math.abs(hash) % 8); // 91% - 98%
+}
+
+/**
  * GET /api/templates
  * Lấy danh sách mẫu đã được duyệt
  */
@@ -209,18 +230,19 @@ router.get('/', async (req, res) => {
 
         const fallbackRes = await basicQuery;
         if (!fallbackRes.error && fallbackRes.data) {
-          data = fallbackRes.data.map(item => ({
-            ...item,
-            confidence_score: 92,
-            warning_points: ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
-          }));
+          data = fallbackRes.data;
           error = null;
         }
       }
 
-      // Nếu có dữ liệu trong database, trả về
+      // Nếu có dữ liệu trong database, chuẩn hóa và trả về
       if (!error && data && data.length > 0) {
-        return res.json({ data, count: data.length });
+        const enriched = data.map(item => ({
+          ...item,
+          confidence_score: getConsistentScore(item),
+          warning_points: item.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+        }));
+        return res.json({ data: enriched, count: enriched.length });
       }
     } catch (err) {
       console.warn('[Templates] Error reading from DB:', err.message);
@@ -228,7 +250,10 @@ router.get('/', async (req, res) => {
   }
 
   // 2. Fallback: Trả về Curated Threat Library
-  const curated = filterCurated(platform, search);
+  const curated = filterCurated(platform, search).map(item => ({
+    ...item,
+    confidence_score: getConsistentScore(item),
+  }));
   return res.json({
     data: curated,
     count: curated.length,
@@ -259,7 +284,12 @@ router.get('/:id', async (req, res) => {
         .maybeSingle();
 
       if (!error && data) {
-        return res.json({ data });
+        const enriched = {
+          ...data,
+          confidence_score: getConsistentScore(data),
+          warning_points: data.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+        };
+        return res.json({ data: enriched });
       }
     } catch (err) {
       console.warn('[Templates] Error fetching id from DB:', err.message);
@@ -272,10 +302,16 @@ router.get('/:id', async (req, res) => {
   );
 
   if (found) {
-    return res.json({ data: found });
+    return res.json({
+      data: {
+        ...found,
+        confidence_score: getConsistentScore(found),
+      }
+    });
   }
 
   res.status(404).json({ error: 'Template not found' });
 });
 
 export default router;
+
