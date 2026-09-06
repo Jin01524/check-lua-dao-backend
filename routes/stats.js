@@ -28,7 +28,7 @@ router.get('/', async (_req, res) => {
 
   if (supabase) {
     try {
-      // 1. Thử đếm từ bảng scan_logs
+      // 1. Thử đếm từ bảng scan_logs (toàn bộ tin nhắn người dùng đã gửi quét)
       const { count: logCount, error: logErr } = await supabase
         .from('scan_logs')
         .select('*', { count: 'exact', head: true });
@@ -37,11 +37,11 @@ router.get('/', async (_req, res) => {
         totalScans = Math.max(totalScans, logCount);
       }
 
-      // Đếm tin nhắn bị cảnh báo từ scan_logs
+      // Đếm tin nhắn bị cảnh báo từ scan_logs (lừa đảo hoặc có điểm rủi ro từ 50% trở lên)
       const { count: warnCount, error: warnErr } = await supabase
         .from('scan_logs')
         .select('*', { count: 'exact', head: true })
-        .eq('is_scam', true);
+        .or('is_scam.eq.true,confidence_score.gte.50');
 
       if (!warnErr && typeof warnCount === 'number') {
         warnedScans = Math.max(warnedScans, warnCount);
@@ -62,14 +62,15 @@ router.get('/', async (_req, res) => {
     }
 
     try {
-      // 2. Query từ bảng scam_templates (số mẫu lừa đảo đã lưu)
+      // 2. Query từ bảng scam_templates (số mẫu lừa đảo đã lưu / thư viện mẫu)
       const { count: templateCount } = await supabase
         .from('scam_templates')
         .select('*', { count: 'exact', head: true });
 
       if (typeof templateCount === 'number') {
         warnedScans = Math.max(warnedScans, templateCount);
-        totalScans = Math.max(totalScans, templateCount);
+        // Đảm bảo tổng số tin nhắn quét luôn lớn hơn hoặc bằng số tin bị cảnh báo
+        totalScans = Math.max(totalScans, warnedScans);
       }
 
       // Lấy max confidence từ scam_templates
