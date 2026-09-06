@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS scam_templates (
   platform TEXT NOT NULL,
   scam_type TEXT,
   analysis TEXT,
+  attack_target TEXT DEFAULT 'Không rõ',
   confidence_score INTEGER DEFAULT 90,
   warning_points JSONB DEFAULT '[]',
   messages_json JSONB NOT NULL DEFAULT '[]',
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS scam_templates (
 -- Migration nếu bảng đã tồn tại từ trước
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 90;
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS warning_points JSONB DEFAULT '[]';
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS attack_target TEXT DEFAULT 'Không rõ';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_display TEXT DEFAULT '123456';
 
@@ -77,13 +79,13 @@ VALUES ('admin', '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm',
 ON CONFLICT (username)
 DO UPDATE SET password_hash = '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', password_display = '123456', role = 'admin', is_active = true;
 
--- Cập nhật điểm rủi ro chuẩn cho các mẫu cũ nếu bị gán mặc định 90
-UPDATE scam_templates SET confidence_score = 98 WHERE title ILIKE '%Vietcombank%';
-UPDATE scam_templates SET confidence_score = 96 WHERE title ILIKE '%Công an%';
-UPDATE scam_templates SET confidence_score = 94 WHERE title ILIKE '%Cộng tác viên%' OR title ILIKE '%Shopee%';
-UPDATE scam_templates SET confidence_score = 97 WHERE title ILIKE '%Thuế%' OR title ILIKE '%Trojan%';
-UPDATE scam_templates SET confidence_score = 93 WHERE title ILIKE '%khóa thuê bao%' OR title ILIKE '%SIM%';
-UPDATE scam_templates SET confidence_score = 92 WHERE title ILIKE '%trúng thưởng%' OR title ILIKE '%Honda SH%';
+-- Cập nhật điểm rủi ro và mục tiêu tấn công chuẩn cho các mẫu cũ
+UPDATE scam_templates SET confidence_score = 98, attack_target = 'Tài khoản ngân hàng & Mã OTP' WHERE title ILIKE '%Vietcombank%';
+UPDATE scam_templates SET confidence_score = 96, attack_target = 'Tiền tiết kiệm / Tài khoản tạm giữ' WHERE title ILIKE '%Công an%';
+UPDATE scam_templates SET confidence_score = 94, attack_target = 'Tiền nạp nhiệm vụ & Giật đơn' WHERE title ILIKE '%Cộng tác viên%' OR title ILIKE '%Shopee%';
+UPDATE scam_templates SET confidence_score = 97, attack_target = 'Quyền kiểm soát điện thoại (Trợ năng)' WHERE title ILIKE '%Thuế%' OR title ILIKE '%Trojan%';
+UPDATE scam_templates SET confidence_score = 93, attack_target = 'Quyền kiểm soát SIM & Mã OTP SMS' WHERE title ILIKE '%khóa thuê bao%' OR title ILIKE '%SIM%';
+UPDATE scam_templates SET confidence_score = 92, attack_target = 'Tiền phí hồ sơ / Phí trước bạ' WHERE title ILIKE '%trúng thưởng%' OR title ILIKE '%Honda SH%';
 
 
 

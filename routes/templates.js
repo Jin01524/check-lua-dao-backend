@@ -13,6 +13,7 @@ export const CURATED_TEMPLATES = [
     title: 'Giả mạo SMS Brandname Vietcombank đe dọa khóa tài khoản trong 24h',
     platform: 'SMS',
     scam_type: 'Phishing chiếm đoạt mã OTP ngân hàng',
+    attack_target: 'Tài khoản ngân hàng & Mã OTP',
     confidence_score: 98,
     analysis: 'Thủ đoạn sử dụng thiết bị trạm phát sóng BTS giả mạo để chèn tin nhắn giả mạo Brandname ngân hàng. Kẻ gian tạo tâm lý hoang mang đe dọa khóa tài khoản hoặc trừ phí dịch vụ cao bất thường nhằm ép nạn nhân click link giả mạo và nhập OTP.',
     warning_points: [
@@ -34,6 +35,7 @@ export const CURATED_TEMPLATES = [
     title: 'Mạo danh Cán bộ Điều tra Công an gọi video và gửi lệnh bắt qua Zalo',
     platform: 'Zalo',
     scam_type: 'Mạo danh cơ quan tư pháp đe dọa tống tiền',
+    attack_target: 'Tiền tiết kiệm / Tài khoản tạm giữ',
     confidence_score: 96,
     analysis: 'Đối tượng đóng giả cán bộ công an hoặc viện kiểm sát, gọi điện thông báo nạn nhân liên quan đến đường dây ma túy hoặc rửa tiền xuyên quốc gia. Đối tượng gửi hình ảnh lệnh bắt giả mạo có mộc đỏ và yêu cầu chuyển toàn bộ tiền tiết kiệm vào tài khoản tạm giữ để thanh tra.',
     warning_points: [
@@ -55,6 +57,7 @@ export const CURATED_TEMPLATES = [
     title: 'Bẫy tuyển dụng Cộng tác viên nạp tiền giật đơn hàng Shopee / Lazada',
     platform: 'Telegram',
     scam_type: 'Lừa đảo tuyển dụng việc làm online nạp tiền',
+    attack_target: 'Tiền nạp nhiệm vụ & Giật đơn',
     confidence_score: 94,
     analysis: 'Đối tượng tiếp cận nạn nhân qua tin nhắn mời gọi làm việc nhẹ lương cao tại nhà (xem video TikTok, giật đơn Shopee). Ban đầu trả hoa hồng thật với các đơn nhỏ 100k - 200k để tạo niềm tin, sau đó nâng đơn lên hàng chục triệu đồng và nại ra các lý do như sai cú pháp, nâng cấp VIP để ép nạn nhân nạp thêm tiền.',
     warning_points: [
@@ -76,6 +79,7 @@ export const CURATED_TEMPLATES = [
     title: 'Mạo danh Chi cục Thuế yêu cầu cài app Dịch vụ công giả mạo chiếm quyền đt',
     platform: 'Facebook',
     scam_type: 'Phát tán mã độc Trojan chiếm quyền trợ năng Android',
+    attack_target: 'Quyền kiểm soát điện thoại (Trợ năng)',
     confidence_score: 97,
     analysis: 'Kẻ lừa đảo liên hệ các hộ kinh doanh hoặc cá nhân thông báo cần cập nhật mã số thuế hoặc nhận hoàn thuế. Kẻ gian gửi đường link cài file .APK ngoài Google Play Store. Ứng dụng độc hại kích hoạt quyền trợ năng (Accessibility Service) để đọc trộm mã OTP và tự động chuyển tiền trong ứng dụng ngân hàng.',
     warning_points: [
@@ -97,6 +101,7 @@ export const CURATED_TEMPLATES = [
     title: 'Cảnh báo khóa thuê bao sau 2 giờ của Cục Viễn thông để cướp SIM',
     platform: 'SMS',
     scam_type: 'Lừa đảo cướp quyền kiểm soát SIM điện thoại',
+    attack_target: 'Quyền kiểm soát SIM & Mã OTP SMS',
     confidence_score: 93,
     analysis: 'Tin nhắn mạo danh Cục Viễn thông thông báo thuê bao chưa chuẩn hóa thông tin và sẽ bị khóa sau 2 giờ. Kẻ lừa đảo hướng dẫn soạn tin nhắn đổi SIM sang e-SIM hoặc gọi số tổng đài giả để chiếm quyền kiểm soát số điện thoại, từ đó nhận OTP rút tiền tài khoản ngân hàng.',
     warning_points: [
@@ -115,6 +120,7 @@ export const CURATED_TEMPLATES = [
     title: 'Thông báo trúng thưởng xe Honda SH qua tin nhắn Messenger',
     platform: 'Facebook',
     scam_type: 'Lừa đảo đóng phí nhận thưởng khuyến mãi',
+    attack_target: 'Tiền phí hồ sơ / Phí trước bạ',
     confidence_score: 92,
     analysis: 'Đối tượng gửi tin nhắn Messenger chúc mừng người dùng trúng giải đặc biệt trong sự kiện tri ân khách hàng của mạng xã hội gồm xe máy SH và 200 triệu đồng tiền mặt. Để nhận giải, nạn nhân phải nộp các khoản phí: phí hồ sơ, phí trước bạ, thuế thu nhập cá nhân vào tài khoản chỉ định.',
     warning_points: [
@@ -193,7 +199,7 @@ router.get('/', async (req, res) => {
     try {
       let query = supabase
         .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, confidence_score, warning_points, created_at')
+        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, created_at')
         .eq('is_approved', true)
         .order('created_at', { ascending: false })
         .range(Number(offset), Number(offset) + Number(limit) - 1);
@@ -209,7 +215,7 @@ router.get('/', async (req, res) => {
 
       let { data, error } = await query;
 
-      // Fallback truy vấn cơ bản nếu thiếu cột mới (confidence_score / warning_points)
+      // Fallback truy vấn cơ bản nếu thiếu cột mới (confidence_score / warning_points / attack_target)
       if (error) {
         console.warn('[Templates] Advanced query failed, falling back to basic columns:', error.message);
         let basicQuery = supabase
@@ -239,6 +245,7 @@ router.get('/', async (req, res) => {
       if (!error && data && data.length > 0) {
         const enriched = data.map(item => ({
           ...item,
+          attack_target: item.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(item),
           warning_points: item.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
         }));
@@ -286,6 +293,7 @@ router.get('/:id', async (req, res) => {
       if (!error && data) {
         const enriched = {
           ...data,
+          attack_target: data.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(data),
           warning_points: data.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
         };

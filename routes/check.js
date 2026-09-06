@@ -157,9 +157,10 @@ router.post('/', upload.array('images', 5), async (req, res) => {
       is_approved: false,
     };
 
-    // Cố gắng chèn thêm confidence_score và warning_points nếu DB đã có cột
+    // Cố gắng chèn thêm attack_target, confidence_score và warning_points nếu DB đã có cột
     let insertData = {
       ...baseTemplate,
+      attack_target: analysisResult.attackTarget || 'Không rõ',
       confidence_score: analysisResult.confidenceScore,
       warning_points: analysisResult.warningPoints,
     };

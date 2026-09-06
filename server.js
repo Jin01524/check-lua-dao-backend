@@ -85,6 +85,7 @@ import { getSupabaseClient } from './lib/supabase.js';
             platform: tpl.platform,
             scam_type: tpl.scam_type,
             analysis: tpl.analysis,
+            attack_target: tpl.attack_target || 'Không rõ',
             confidence_score: tpl.confidence_score || 95,
             warning_points: tpl.warning_points || [],
             messages_json: tpl.messages_json,

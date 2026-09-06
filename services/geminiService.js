@@ -100,6 +100,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   "isScam": true,
   "scamType": "Tên loại hình lừa đảo (ví dụ: Giả mạo ngân hàng Vietcombank chiếm đoạt mã OTP)",
   "title": "Tiêu đề ngắn gọn hồ sơ vụ việc",
+  "attackTarget": "Mục tiêu tấn công cụ thể của kẻ gian (ví dụ: Tài khoản ngân hàng & Mã OTP, Tiền chuyển khoản, Cướp SIM điện thoại, Quyền kiểm soát thiết bị Android, Thông tin danh tính cá nhân). Nếu không rõ hoặc không xác định được thì ghi là 'Không rõ'.",
   "confidenceScore": 94,
   "analysis": "Phân tích chi tiết thủ đoạn tấn công và cơ chế thao túng tâm lý",
   "warningPoints": [
@@ -167,6 +168,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       isScam: Boolean(parsed.isScam),
       scamType: parsed.scamType || null,
       title: parsed.title || null,
+      attackTarget: (parsed.attackTarget && String(parsed.attackTarget).trim()) || 'Không rõ',
       confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0,
       analysis: parsed.analysis || '',
       warningPoints: Array.isArray(parsed.warningPoints) ? parsed.warningPoints : [],
