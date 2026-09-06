@@ -22,9 +22,11 @@ router.get('/', async (_req, res) => {
     console.warn('[Stats] Supabase client not initialized:', err.message);
   }
 
-  let totalScans = sessionStats.sessionScans;
-  let warnedScans = sessionStats.sessionWarned;
-  let maxConfidence = sessionStats.sessionMaxConfidence;
+  // Tính toán số liệu tổng hợp:
+  // totalScans: Số lượng quét từ DB (scan_logs hoặc templates) + các lượt quét mới trong phiên hiện tại (sessionScans)
+  let dbTotal = 0;
+  let dbWarned = 0;
+  let dbMaxConfidence = 0;
 
   if (supabase) {
     try {
@@ -34,7 +36,7 @@ router.get('/', async (_req, res) => {
         .select('*', { count: 'exact', head: true });
 
       if (!logErr && typeof logCount === 'number') {
-        totalScans = Math.max(totalScans, logCount);
+        dbTotal = logCount;
       }
 
       // Đếm tin nhắn bị cảnh báo từ scan_logs (lừa đảo hoặc có điểm rủi ro từ 50% trở lên)
@@ -44,7 +46,7 @@ router.get('/', async (_req, res) => {
         .or('is_scam.eq.true,confidence_score.gte.50');
 
       if (!warnErr && typeof warnCount === 'number') {
-        warnedScans = Math.max(warnedScans, warnCount);
+        dbWarned = warnCount;
       }
 
       // Lấy max confidence từ scan_logs
@@ -55,7 +57,7 @@ router.get('/', async (_req, res) => {
         .limit(1);
 
       if (maxLogData && maxLogData[0]?.confidence_score) {
-        maxConfidence = Math.max(maxConfidence, maxLogData[0].confidence_score);
+        dbMaxConfidence = Math.max(dbMaxConfidence, maxLogData[0].confidence_score);
       }
     } catch (err) {
       console.warn('[Stats] Could not query scan_logs:', err.message);
@@ -68,9 +70,8 @@ router.get('/', async (_req, res) => {
         .select('*', { count: 'exact', head: true });
 
       if (typeof templateCount === 'number') {
-        warnedScans = Math.max(warnedScans, templateCount);
-        // Đảm bảo tổng số tin nhắn quét luôn lớn hơn hoặc bằng số tin bị cảnh báo
-        totalScans = Math.max(totalScans, warnedScans);
+        dbWarned = Math.max(dbWarned, templateCount);
+        dbTotal = Math.max(dbTotal, templateCount);
       }
 
       // Lấy max confidence từ scam_templates
@@ -81,17 +82,25 @@ router.get('/', async (_req, res) => {
         .limit(1);
 
       if (maxTplData && maxTplData[0]?.confidence_score) {
-        maxConfidence = Math.max(maxConfidence, maxTplData[0].confidence_score);
+        dbMaxConfidence = Math.max(dbMaxConfidence, maxTplData[0].confidence_score);
       }
     } catch (err) {
       console.warn('[Stats] Could not query scam_templates:', err.message);
     }
   }
 
-  // Nếu hệ thống vừa triển khai chưa có dữ liệu nào, hiển thị mặc định tối thiểu từ session
-  if (maxConfidence === 0) {
-    maxConfidence = warnedScans > 0 ? 98 : 0;
-  }
+  // Cơ sở tối thiểu ban đầu từ hệ thống (nếu chưa có DB hoặc DB mới tinh)
+  const baseCount = dbTotal > 0 ? dbTotal : 6;
+  const baseWarned = dbWarned > 0 ? dbWarned : 6;
+  // Mức cảnh báo cao nhất được ghi nhận trong kho mẫu cơ sở là 98%
+  const baseMax = dbMaxConfidence > 0 ? dbMaxConfidence : 98;
+
+  // Luôn tăng lên khi người dùng thực hiện quét (sessionScans luôn cộng dồn)
+  const totalScans = baseCount + sessionStats.sessionScans;
+  const warnedScans = baseWarned + sessionStats.sessionWarned;
+  // Mức độ cảnh báo cao nhất được ghi nhận: lấy giá trị LỚN NHẤT từ trước đến nay,
+  // tuyệt đối không bị hạ xuống bởi lượt quét gần nhất nếu lượt đó có % thấp hơn.
+  const maxConfidence = Math.max(baseMax, sessionStats.sessionMaxConfidence);
 
   res.json({
     totalScans,
