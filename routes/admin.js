@@ -346,17 +346,17 @@ router.get('/users', async (req, res) => {
 
   let { data, error } = await supabase
     .from('users')
-    .select('id, username, role, is_active, created_at')
+    .select('id, username, role, is_active, password_display, created_at')
     .order('created_at', { ascending: false });
 
-  // Fallback nếu DB chưa có cột is_active
+  // Fallback nếu DB chưa có cột is_active hoặc password_display
   if (error) {
     const fallback = await supabase
       .from('users')
       .select('id, username, role, created_at')
       .order('created_at', { ascending: false });
     if (!fallback.error && fallback.data) {
-      data = fallback.data.map(u => ({ ...u, is_active: true }));
+      data = fallback.data.map(u => ({ ...u, is_active: true, password_display: '123456' }));
       error = null;
     }
   }
@@ -368,6 +368,7 @@ router.get('/users', async (req, res) => {
   const list = (data || []).map(u => ({
     ...u,
     is_active: u.is_active !== false,
+    password_display: u.password_display || (u.username?.toLowerCase() === 'admin' ? '123456' : '••••••'),
   }));
 
   // Đảm bảo luôn có tài khoản admin master
@@ -377,6 +378,7 @@ router.get('/users', async (req, res) => {
       username: 'admin',
       role: 'admin',
       is_active: true,
+      password_display: '123456',
       created_at: new Date().toISOString(),
     });
   }
@@ -430,6 +432,7 @@ router.post('/users', async (req, res) => {
   let insertObj = {
     username: cleanUsername,
     password_hash: passwordHash,
+    password_display: password,
     role: validRole,
     is_active: true,
   };
@@ -437,19 +440,20 @@ router.post('/users', async (req, res) => {
   let { data, error } = await supabase
     .from('users')
     .insert(insertObj)
-    .select('id, username, role, is_active, created_at')
+    .select('id, username, role, is_active, password_display, created_at')
     .single();
 
-  // Fallback nếu DB chưa có cột is_active
+  // Fallback nếu DB chưa có cột is_active hoặc password_display
   if (error) {
     delete insertObj.is_active;
+    delete insertObj.password_display;
     const fallback = await supabase
       .from('users')
       .insert(insertObj)
       .select('id, username, role, created_at')
       .single();
     if (!fallback.error) {
-      data = { ...fallback.data, is_active: true };
+      data = { ...fallback.data, is_active: true, password_display: password };
       error = null;
     }
   }
@@ -460,7 +464,7 @@ router.post('/users', async (req, res) => {
 
   res.status(201).json({
     message: `Đã tạo tài khoản ${validRole === 'moderator' ? 'Kiểm duyệt viên' : 'Quản trị viên'} thành công`,
-    data: { ...data, is_active: true },
+    data: { ...data, is_active: true, password_display: password },
   });
 });
 
@@ -521,6 +525,7 @@ router.patch('/users/:id', async (req, res) => {
       return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
     }
     updateFields.password_hash = await bcrypt.hash(password, 10);
+    updateFields.password_display = password;
   }
 
   // 3. Khóa / Mở khóa tài khoản
@@ -547,13 +552,15 @@ router.patch('/users/:id', async (req, res) => {
     .from('users')
     .update(updateFields)
     .eq('id', id)
-    .select('id, username, role, is_active, created_at')
+    .select('id, username, role, is_active, password_display, created_at')
     .single();
 
-  // Fallback nếu lỗi do chưa có cột is_active
-  if (error && updateFields.is_active !== undefined) {
+  // Fallback nếu lỗi do chưa có cột is_active hoặc password_display
+  if (error && (updateFields.is_active !== undefined || updateFields.password_display !== undefined)) {
     const desiredActive = updateFields.is_active;
+    const desiredPass = updateFields.password_display;
     delete updateFields.is_active;
+    delete updateFields.password_display;
     if (Object.keys(updateFields).length > 0) {
       const fallback = await supabase
         .from('users')
@@ -561,11 +568,19 @@ router.patch('/users/:id', async (req, res) => {
         .eq('id', id)
         .select('id, username, role, created_at')
         .single();
-      data = fallback.data ? { ...fallback.data, is_active: desiredActive } : null;
+      data = fallback.data ? {
+        ...fallback.data,
+        is_active: desiredActive !== undefined ? desiredActive : true,
+        password_display: desiredPass || targetUser.password_display || '••••••'
+      } : null;
       error = fallback.error;
     } else {
       error = null;
-      data = { ...targetUser, is_active: desiredActive };
+      data = {
+        ...targetUser,
+        is_active: desiredActive !== undefined ? desiredActive : true,
+        password_display: desiredPass || targetUser.password_display || '••••••'
+      };
     }
   }
 
@@ -575,7 +590,11 @@ router.patch('/users/:id', async (req, res) => {
 
   res.json({
     message: 'Cập nhật tài khoản thành công',
-    data: { ...data, is_active: data?.is_active !== false },
+    data: {
+      ...data,
+      is_active: data?.is_active !== false,
+      password_display: data?.password_display || (data?.username?.toLowerCase() === 'admin' ? '123456' : '••••••'),
+    },
   });
 });
 

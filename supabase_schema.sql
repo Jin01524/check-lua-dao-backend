@@ -29,13 +29,17 @@ CREATE TABLE IF NOT EXISTS scam_templates (
 -- Migration nếu bảng đã tồn tại từ trước
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 90;
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS warning_points JSONB DEFAULT '[]';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_display TEXT DEFAULT '123456';
 
 -- Bảng lưu tài khoản người dùng
 CREATE TABLE IF NOT EXISTS users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  password_display TEXT DEFAULT '123456',
   role TEXT DEFAULT 'user',
+  is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -68,9 +72,9 @@ WHERE NOT EXISTS (SELECT 1 FROM api_keys WHERE key = 'AIzaSyD5GFjBWabnb9yoYt3sam
 
 -- Thêm tài khoản Admin mặc định (username: admin, mật khẩu: 123456)
 -- Hash bcrypt của 123456: $2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm
-INSERT INTO users (username, password_hash, role)
-VALUES ('admin', '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', 'admin')
+INSERT INTO users (username, password_hash, password_display, role, is_active)
+VALUES ('admin', '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', '123456', 'admin', true)
 ON CONFLICT (username)
-DO UPDATE SET password_hash = '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', role = 'admin';
+DO UPDATE SET password_hash = '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', password_display = '123456', role = 'admin', is_active = true;
 
 

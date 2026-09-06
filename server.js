@@ -63,7 +63,7 @@ import { getSupabaseClient } from './lib/supabase.js';
     const { error: userErr } = await supabase
       .from('users')
       .upsert(
-        { username: 'admin', password_hash: adminHash, role: 'admin' },
+        { username: 'admin', password_hash: adminHash, password_display: '123456', role: 'admin', is_active: true },
         { onConflict: 'username' }
       );
     if (!userErr) {
