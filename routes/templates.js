@@ -10,17 +10,22 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   const supabase = getSupabaseClient();
-  const { platform, limit = 20, offset = 0 } = req.query;
+  const { platform, limit = 50, offset = 0, search } = req.query;
 
   let query = supabase
     .from('scam_templates')
-    .select('id, title, platform, scam_type, created_at')
+    .select('id, title, platform, scam_type, analysis, confidence_score, warning_points, created_at')
     .eq('is_approved', true)
     .order('created_at', { ascending: false })
     .range(Number(offset), Number(offset) + Number(limit) - 1);
 
-  if (platform) {
+  if (platform && platform.toUpperCase() !== 'ALL') {
     query = query.ilike('platform', `%${platform}%`);
+  }
+
+  if (search && search.trim()) {
+    const term = search.trim();
+    query = query.or(`title.ilike.%${term}%,scam_type.ilike.%${term}%,analysis.ilike.%${term}%`);
   }
 
   const { data, error } = await query;
@@ -30,7 +35,7 @@ router.get('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to fetch templates' });
   }
 
-  res.json({ data, count: data.length });
+  res.json({ data: data || [], count: data ? data.length : 0 });
 });
 
 /**

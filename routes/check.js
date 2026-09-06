@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
-import { analyzeImages } from '../services/geminiService.js';
+import { analyzeContent } from '../services/geminiService.js';
 
 const router = express.Router();
 
@@ -23,21 +23,26 @@ const upload = multer({
 
 /**
  * POST /api/check
- * Phân tích ảnh tin nhắn để phát hiện lừa đảo
+ * Phân tích ảnh tin nhắn và/hoặc văn bản để phát hiện lừa đảo
  *
  * Body (multipart/form-data):
- *   images  - Tối đa 5 file ảnh (field name: images)
- *   platform - Tên nền tảng (Zalo, Facebook, SMS, v.v.)
+ *   images   - Tối đa 5 file ảnh (field name: images)
+ *   text     - Nội dung văn bản hoặc link nghi vấn đi kèm
+ *   platform - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
  */
 router.post('/', upload.array('images', 5), async (req, res) => {
   const supabase = getSupabaseClient();
 
-  // Validate input
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'At least one image is required' });
-  }
+  const files = req.files || [];
+  const textContent = (req.body.text || req.body.content || '').trim();
+  const platform = req.body.platform || 'SMS';
 
-  const platform = req.body.platform || 'Không xác định';
+  // Validate: Cần ít nhất 1 ảnh HOẶC 1 đoạn văn bản
+  if (files.length === 0 && !textContent) {
+    return res.status(400).json({
+      error: 'Vui lòng cung cấp ít nhất 1 ảnh chụp màn hình hoặc nội dung tin nhắn cần kiểm tra.',
+    });
+  }
 
   // ── Lấy API key active từ Supabase ───────────────────────────────────────
   const { data: dbKeys, error: dbError } = await supabase
@@ -46,7 +51,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
 
   let activeKeys = [];
   if (!dbError && dbKeys && dbKeys.length > 0) {
-    activeKeys = dbKeys.filter(k => k.is_active);
+    activeKeys = dbKeys.filter((k) => k.is_active);
   }
 
   // Fallback nếu không có key nào trong DB
@@ -57,7 +62,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         id: 'fallback',
         key: fallbackKey,
         label: 'Fallback Env Key',
-        is_active: true
+        is_active: true,
       });
       console.warn('[Check] No active keys in DB, using fallback GEMINI_API_KEY from .env');
     }
@@ -94,41 +99,42 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     console.error('[Check] Failed to fetch few-shot examples:', err.message);
   }
 
-  // ── Gọi Gemini để phân tích (thử xoay tua các key) ─────────────────────────
+  // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
   let analysisResult = null;
   let lastError = null;
 
   for (const keyObj of shuffledKeys) {
     try {
       console.log(`[Check] Attempting analysis with key: ${keyObj.label} (${keyObj.id})`);
-      analysisResult = await analyzeImages(req.files, platform, keyObj.key, fewShotExamples);
+      analysisResult = await analyzeContent({
+        imageFiles: files,
+        textContent,
+        platform,
+        apiKey: keyObj.key,
+        fewShotExamples,
+      });
       console.log(`[Check] Success using key: ${keyObj.label}`);
-      break; // Thành công, thoát vòng lặp
+      break;
     } catch (err) {
       lastError = err;
       console.error(`[Check] Error with key "${keyObj.label}" (${keyObj.id}):`, err.message);
 
-      // Kiểm tra xem có phải lỗi vĩnh viễn không (403 Forbidden, 400 Bad Request, API key invalid, leaked, v.v.)
-      // Lỗi 429 (Rate Limit / Quota) thì không tắt key trong DB, chỉ chuyển sang key tiếp theo.
-      const isPermanentError = 
-        err.status === 403 || 
-        err.status === 400 || 
-        err.message.includes('API key') || 
-        err.message.includes('API_KEY') || 
+      // Tự động tắt key nếu bị vô hiệu vĩnh viễn
+      const isPermanentError =
+        err.status === 403 ||
+        err.status === 400 ||
+        err.message.includes('API key') ||
+        err.message.includes('API_KEY') ||
         err.message.includes('PERMISSION_DENIED') ||
         err.message.includes('invalid');
 
       if (isPermanentError && keyObj.id !== 'fallback') {
-        console.warn(`[Check] Key "${keyObj.label}" (${keyObj.id}) failed permanently. Automatically disabling it in DB.`);
-        // Tắt trạng thái key trong DB bất đồng bộ (không cần await để tránh block request)
+        console.warn(`[Check] Disabling invalid key "${keyObj.label}" in DB.`);
         supabase
           .from('api_keys')
           .update({ is_active: false })
           .eq('id', keyObj.id)
-          .then(({ error }) => {
-            if (error) console.error(`[Check] Failed to auto-disable key ${keyObj.id}:`, error.message);
-            else console.log(`[Check] Key ${keyObj.id} is now disabled in DB.`);
-          });
+          .then(() => {});
       }
     }
   }
@@ -138,35 +144,56 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     return res.status(500).json({ error: `Phân tích thất bại: ${errorMsg}` });
   }
 
-  // ── Nếu là lừa đảo: lưu vào DB (pending approval) ────────────────────────
+  // ── Nếu là lừa đảo: lưu vào DB (chờ phê duyệt) ──────────────────────────
   let savedTemplateId = null;
   if (analysisResult.isChatScreenshot && analysisResult.isScam && analysisResult.title) {
-    const { data: savedTemplate, error: saveError } = await supabase
+    const baseTemplate = {
+      title: analysisResult.title,
+      platform,
+      scam_type: analysisResult.scamType,
+      analysis: analysisResult.analysis,
+      messages_json: analysisResult.messages,
+      is_approved: false,
+    };
+
+    // Cố gắng chèn thêm confidence_score và warning_points nếu DB đã có cột
+    let insertData = {
+      ...baseTemplate,
+      confidence_score: analysisResult.confidenceScore,
+      warning_points: analysisResult.warningPoints,
+    };
+
+    let { data: savedTemplate, error: saveError } = await supabase
       .from('scam_templates')
-      .insert({
-        title: analysisResult.title,
-        platform,
-        scam_type: analysisResult.scamType,
-        analysis: analysisResult.analysis,
-        messages_json: analysisResult.messages,
-        is_approved: false,
-      })
+      .insert(insertData)
       .select('id')
       .single();
 
+    // Nếu lỗi do cột chưa tồn tại, fallback chèn bản cơ sở
     if (saveError) {
-      console.error('[Check] Failed to save template:', saveError.message);
-    } else {
-      savedTemplateId = savedTemplate?.id;
+      const fallbackResult = await supabase
+        .from('scam_templates')
+        .insert(baseTemplate)
+        .select('id')
+        .single();
+      savedTemplate = fallbackResult.data;
+      if (fallbackResult.error) {
+        console.error('[Check] Failed to save template fallback:', fallbackResult.error.message);
+      }
+    }
+
+    if (savedTemplate?.id) {
+      savedTemplateId = savedTemplate.id;
       console.log(`[Check] Scam template saved with id: ${savedTemplateId} (pending approval)`);
     }
   }
 
-  // ── Trả về kết quả ────────────────────────────────────────────────────────
+  // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   res.json({
     ...analysisResult,
     platform,
-    imageCount: req.files.length,
+    imageCount: files.length,
+    hasText: Boolean(textContent),
     savedTemplateId,
   });
 });

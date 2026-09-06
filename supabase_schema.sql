@@ -19,10 +19,16 @@ CREATE TABLE IF NOT EXISTS scam_templates (
   platform TEXT NOT NULL,
   scam_type TEXT,
   analysis TEXT,
+  confidence_score INTEGER DEFAULT 90,
+  warning_points JSONB DEFAULT '[]',
   messages_json JSONB NOT NULL DEFAULT '[]',
   is_approved BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration nếu bảng đã tồn tại từ trước
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 90;
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS warning_points JSONB DEFAULT '[]';
 
 -- Bảng lưu tài khoản người dùng
 CREATE TABLE IF NOT EXISTS users (

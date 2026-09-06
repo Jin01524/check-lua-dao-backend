@@ -197,20 +197,41 @@ router.patch('/templates/:id/approve', async (req, res) => {
 
 /**
  * PATCH /api/admin/templates/:id
- * Sửa mẫu (title, analysis, messages_json, is_approved, scam_type)
+ * Sửa mẫu (title, analysis, messages_json, is_approved, scam_type, confidence_score, warning_points)
  */
 router.patch('/templates/:id', async (req, res) => {
   const supabase = getSupabaseClient();
   const { id } = req.params;
-  const { title, analysis, messages_json, is_approved, scam_type, platform } = req.body;
+  const {
+    title,
+    analysis,
+    messages_json,
+    is_approved,
+    isApproved,
+    scam_type,
+    platform,
+    confidence_score,
+    confidenceScore,
+    warning_points,
+    warningPoints,
+  } = req.body;
 
   const updateFields = {};
   if (title !== undefined) updateFields.title = title;
   if (analysis !== undefined) updateFields.analysis = analysis;
   if (messages_json !== undefined) updateFields.messages_json = messages_json;
-  if (typeof is_approved === 'boolean') updateFields.is_approved = is_approved;
+
+  const approvedVal = typeof isApproved === 'boolean' ? isApproved : (typeof is_approved === 'boolean' ? is_approved : undefined);
+  if (approvedVal !== undefined) updateFields.is_approved = approvedVal;
+
   if (scam_type !== undefined) updateFields.scam_type = scam_type;
   if (platform !== undefined) updateFields.platform = platform;
+
+  const scoreVal = confidenceScore !== undefined ? confidenceScore : confidence_score;
+  if (scoreVal !== undefined) updateFields.confidence_score = Number(scoreVal);
+
+  const warnVal = warningPoints !== undefined ? warningPoints : warning_points;
+  if (warnVal !== undefined) updateFields.warning_points = warnVal;
 
   if (Object.keys(updateFields).length === 0) {
     return res.status(400).json({ error: 'No fields to update' });
@@ -240,15 +261,36 @@ router.patch('/templates/:id', async (req, res) => {
 router.put('/templates/:id', async (req, res) => {
   const supabase = getSupabaseClient();
   const { id } = req.params;
-  const { title, analysis, messages_json, is_approved, scam_type, platform } = req.body;
+  const {
+    title,
+    analysis,
+    messages_json,
+    is_approved,
+    isApproved,
+    scam_type,
+    platform,
+    confidence_score,
+    confidenceScore,
+    warning_points,
+    warningPoints,
+  } = req.body;
 
   const updateFields = {};
   if (title !== undefined) updateFields.title = title;
   if (analysis !== undefined) updateFields.analysis = analysis;
   if (messages_json !== undefined) updateFields.messages_json = messages_json;
-  if (typeof is_approved === 'boolean') updateFields.is_approved = is_approved;
+
+  const approvedVal = typeof isApproved === 'boolean' ? isApproved : (typeof is_approved === 'boolean' ? is_approved : undefined);
+  if (approvedVal !== undefined) updateFields.is_approved = approvedVal;
+
   if (scam_type !== undefined) updateFields.scam_type = scam_type;
   if (platform !== undefined) updateFields.platform = platform;
+
+  const scoreVal = confidenceScore !== undefined ? confidenceScore : confidence_score;
+  if (scoreVal !== undefined) updateFields.confidence_score = Number(scoreVal);
+
+  const warnVal = warningPoints !== undefined ? warningPoints : warning_points;
+  if (warnVal !== undefined) updateFields.warning_points = warnVal;
 
   const { data, error } = await supabase
     .from('scam_templates')
