@@ -122,13 +122,12 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
   }
 
-  // So sánh password
-  const isMatch = await bcrypt.compare(password, user.password_hash);
-  if (!isMatch) {
-    return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
+  // Kiểm tra tài khoản có bị khóa không
+  if (user.is_active === false) {
+    return res.status(403).json({ error: 'Tài khoản này đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.' });
   }
 
-  const assignedRole = user.role === 'admin' ? 'admin' : 'user';
+  const assignedRole = ['admin', 'moderator', 'user'].includes(user.role) ? user.role : 'user';
 
   // Tạo token
   const token = jwt.sign(
