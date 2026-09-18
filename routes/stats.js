@@ -11,6 +11,10 @@ export const sessionStats = {
   sessionMaxConfidence: 0,
 };
 
+export function getTemplateMessagesCount(templates) {
+  return Array.isArray(templates) ? templates.length : 9;
+}
+
 /**
  * Lấy số lượng mẫu tin nhắn lừa đảo và điểm cảnh báo cao nhất từ thư viện mẫu
  */
