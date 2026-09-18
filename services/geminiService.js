@@ -1,6 +1,72 @@
 import { GoogleGenAI } from '@google/genai';
 
 /**
+ * Danh sách model Gemini Flash được hỗ trợ từ 2.5 Flash đến 3.5 Flash (KHÔNG dùng dòng Lite)
+ * Ưu tiên mặc định: gemini-3.5-flash
+ */
+export const SUPPORTED_MODELS = [
+  {
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    badge: 'Khuyên dùng',
+    description: 'Thế hệ mới nhất, tối ưu lý luận an ninh mạng, phản hồi tức thì và chính xác cao.',
+    isDefault: true,
+  },
+  {
+    id: 'gemini-3.0-flash',
+    name: 'Gemini 3.0 Flash',
+    badge: 'Tốc độ cao',
+    description: 'Cân bằng tối ưu giữa tốc độ phân tích và khả năng phát hiện thủ đoạn tinh vi.',
+    isDefault: false,
+  },
+  {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    badge: 'Chuyên sâu',
+    description: 'Xử lý ổn định cao, nhận diện cấu trúc lừa đảo và tin nhắn mẫu chuẩn xác.',
+    isDefault: false,
+  },
+];
+
+// Lưu model active trong bộ nhớ để phản hồi realtime 0ms cho toàn hệ thống
+let activeGeminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+
+export function getActiveGeminiModel() {
+  return activeGeminiModel;
+}
+
+export function setActiveGeminiModel(modelId) {
+  const exists = SUPPORTED_MODELS.some((m) => m.id === modelId);
+  if (!exists) {
+    throw new Error(`Model "${modelId}" không hợp lệ. Chỉ hỗ trợ các model Flash từ 2.5 đến 3.5 (không dùng Lite).`);
+  }
+  activeGeminiModel = modelId;
+  console.log(`[GeminiService] Realtime active model switched to: ${activeGeminiModel}`);
+  return activeGeminiModel;
+}
+
+// Khởi tạo model đã lưu từ DB khi server khởi động (nếu có)
+export async function initActiveModelFromDB() {
+  try {
+    const { getSupabaseClient } = await import('../lib/supabase.js');
+    const supabase = getSupabaseClient();
+    const { data } = await supabase
+      .from('system_stats')
+      .select('active_model')
+      .eq('id', 'global')
+      .maybeSingle();
+
+    if (data?.active_model && SUPPORTED_MODELS.some((m) => m.id === data.active_model)) {
+      activeGeminiModel = data.active_model;
+      console.log(`[GeminiService] Initialized active model from DB: ${activeGeminiModel}`);
+    }
+  } catch (err) {
+    // Graceful fallback nếu Supabase chưa có cột
+  }
+}
+initActiveModelFromDB().catch(() => {});
+
+/**
  * Phân tích ảnh và/hoặc nội dung tin nhắn bằng Gemini AI để phát hiện lừa đảo.
  * Hỗ trợ đa phương thức: chỉ ảnh, chỉ văn bản, hoặc kết hợp cả hai.
  *
@@ -119,16 +185,24 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   ]
 }`;
 
-  // ── Call Gemini API (Chỉ sử dụng model Gemini 3.1 Flash Lite) ──────────────
+  // ── Call Gemini API (Flash models 2.5 - 3.5, ưu tiên activeGeminiModel và 3.5 Flash trước) ──
+  const active = getActiveGeminiModel();
   const candidateModels = [
-    'gemini-3.1-flash-lite',
-    'gemini-3.1-flash-lite-preview',
-  ];
+    active,
+    'gemini-3.5-flash',
+    'gemini-3.0-flash',
+    'gemini-2.5-flash',
+    'gemini-3.5-flash-preview',
+    'gemini-3.0-flash-preview',
+    'gemini-2.5-flash-preview',
+  ].filter(Boolean);
+
+  const uniqueModels = [...new Set(candidateModels)];
 
   let lastModelError = null;
   let response = null;
 
-  for (const modelName of candidateModels) {
+  for (const modelName of uniqueModels) {
     try {
       response = await ai.models.generateContent({
         model: modelName,

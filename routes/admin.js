@@ -4,11 +4,69 @@ import { getSupabaseClient } from '../lib/supabase.js';
 import authMiddleware from '../middleware/auth.js';
 import { getConsistentScore, CURATED_TEMPLATES } from './templates.js';
 import { sessionStats, cachedStats } from './stats.js';
+import {
+  getActiveGeminiModel,
+  setActiveGeminiModel,
+  SUPPORTED_MODELS,
+} from '../services/geminiService.js';
 
 const router = express.Router();
 
 // Áp dụng auth middleware cho tất cả routes trong /api/admin
 router.use(authMiddleware);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GEMINI MODEL REALTIME MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/admin/active-model
+ * Lấy model Gemini đang kích hoạt và danh sách các model được hỗ trợ (2.5 Flash -> 3.5 Flash)
+ */
+router.get('/active-model', (_req, res) => {
+  res.json({
+    activeModel: getActiveGeminiModel(),
+    supportedModels: SUPPORTED_MODELS,
+  });
+});
+
+/**
+ * POST /api/admin/active-model
+ * Chuyển đổi model Gemini realtime cho toàn hệ thống
+ * Body: { model: 'gemini-3.5-flash' }
+ */
+router.post('/active-model', async (req, res) => {
+  const { model } = req.body;
+  if (!model) {
+    return res.status(400).json({ error: 'Mã model là bắt buộc' });
+  }
+
+  try {
+    const updated = setActiveGeminiModel(model);
+
+    // Cố gắng lưu vào Supabase system_stats nếu có cột active_model
+    try {
+      const supabase = getSupabaseClient();
+      await supabase
+        .from('system_stats')
+        .update({
+          active_model: updated,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 'global');
+    } catch (dbErr) {
+      console.warn('[Admin] Note: Supabase active_model column update skipped:', dbErr.message);
+    }
+
+    res.json({
+      message: `Đã chuyển đổi model AI toàn hệ thống sang ${updated} thành công!`,
+      activeModel: updated,
+      supportedModels: SUPPORTED_MODELS,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // API KEYS Management
