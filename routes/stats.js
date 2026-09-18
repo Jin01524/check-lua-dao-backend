@@ -36,7 +36,9 @@ export async function getTemplateBaseMetrics(supabase) {
   try {
     const { data, count: exactCount, error } = await supabase
       .from('scam_templates')
-      .select('confidence_score', { count: 'exact' });
+      .select('confidence_score', { count: 'exact' })
+      .gte('confidence_score', 40)
+      .neq('scam_type', 'Tin nhắn an toàn / Bình thường');
 
     if (!error) {
       if (typeof exactCount === 'number') {

@@ -278,9 +278,12 @@ router.get('/', async (req, res) => {
   // 1. Nếu có Supabase, thử truy vấn cơ sở dữ liệu
   if (supabase) {
     try {
+      // Kho mẫu lừa đảo: chỉ hiển thị các mẫu đạt mức rủi ro (confidence_score >= 40 và không phải mẫu an toàn)
       let query = supabase
         .from('scam_templates')
         .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, is_approved, created_at')
+        .gte('confidence_score', 40)
+        .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
         .order('created_at', { ascending: false })
         .range(Number(offset), Number(offset) + Number(limit) - 1);
 
@@ -308,6 +311,7 @@ router.get('/', async (req, res) => {
         let basicQuery = supabase
           .from('scam_templates')
           .select('id, title, platform, scam_type, analysis, is_approved, created_at')
+          .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
           .order('created_at', { ascending: false })
           .range(Number(offset), Number(offset) + Number(limit) - 1);
 
@@ -333,9 +337,17 @@ router.get('/', async (req, res) => {
         }
       }
 
-      // Nếu có dữ liệu trong database, chuẩn hóa và trả về
+      // Nếu có dữ liệu trong database, chuẩn hóa và loại bỏ các mẫu tin nhắn an toàn
       if (!error && data && data.length > 0) {
-        const enriched = data.map(item => ({
+        const riskOnlyData = data.filter((item) => {
+          const score = Number(item.confidence_score);
+          const isSafeType = String(item.scam_type || '').includes('Tin nhắn an toàn');
+          if (isSafeType) return false;
+          if (!isNaN(score) && score > 0 && score < 40) return false;
+          return true;
+        });
+
+        const enriched = riskOnlyData.map(item => ({
           ...item,
           attack_target: item.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(item),

@@ -81,8 +81,9 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   try {
     const { data: samePlatformExamples } = await supabase
       .from('scam_templates')
-      .select('id, title, platform, scam_type, analysis, messages_json')
-      .eq('is_approved', true)
+      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+      .gte('confidence_score', 40)
+      .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
       .ilike('platform', `%${platform}%`)
       .limit(2);
 
@@ -91,13 +92,28 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     } else {
       const { data: anyExamples } = await supabase
         .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, messages_json')
-        .eq('is_approved', true)
+        .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+        .gte('confidence_score', 40)
+        .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
         .limit(2);
       fewShotExamples = anyExamples || [];
     }
   } catch (err) {
     console.error('[Check] Failed to fetch few-shot examples:', err.message);
+  }
+
+  // ── Lấy 1-2 mẫu an toàn từ DB để AI đối chiếu phân biệt ─────────────────
+  let safeExamples = [];
+  try {
+    const { data: safeDbExamples } = await supabase
+      .from('scam_templates')
+      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+      .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
+      .limit(2);
+
+    safeExamples = safeDbExamples || [];
+  } catch (err) {
+    console.warn('[Check] Could not fetch safe reference examples:', err.message);
   }
 
   // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
@@ -113,6 +129,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         platform,
         apiKey: keyObj.key,
         fewShotExamples,
+        safeExamples,
       });
       console.log(`[Check] Success using key: ${keyObj.label}`);
       break;
@@ -145,56 +162,92 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     return res.status(500).json({ error: `Phân tích thất bại: ${errorMsg}` });
   }
 
-  // ── Nếu đạt mức rủi ro / lừa đảo: lưu vào DB (trạng thái Chưa kiểm định is_approved = false) ──
+  // ── Lưu trữ tin nhắn vào DB (Cả mẫu rủi ro và mẫu an toàn) ──────────────
   let savedTemplateId = null;
   const numScore = Number(analysisResult.confidenceScore) || 0;
   const hasRisk = Boolean(analysisResult.isScam) || numScore >= 40;
   const hasContent = Boolean(analysisResult.isChatScreenshot) || Boolean(textContent) || files.length > 0;
 
-  if (hasRisk && hasContent && (analysisResult.title || analysisResult.scamType)) {
+  if (hasContent) {
     const messagesToSave = Array.isArray(analysisResult.messages) && analysisResult.messages.length > 0
       ? analysisResult.messages
-      : (textContent ? [{ sender: 'scammer', text: textContent }] : []);
+      : (textContent ? [{ sender: 'user', text: textContent }] : []);
 
-    const baseTemplate = {
-      title: analysisResult.title || analysisResult.scamType || 'Nghi vấn tin nhắn lừa đảo mới',
-      platform,
-      scam_type: analysisResult.scamType || 'Nghi vấn lừa đảo',
-      analysis: analysisResult.analysis || '',
-      messages_json: messagesToSave,
-      is_approved: false,
-    };
+    if (hasRisk && (analysisResult.title || analysisResult.scamType)) {
+      // 1. Tin nhắn có rủi ro: Lưu vào kho mẫu lừa đảo (trạng thái Chưa kiểm định is_approved = false)
+      const baseTemplate = {
+        title: analysisResult.title || analysisResult.scamType || 'Nghi vấn tin nhắn lừa đảo mới',
+        platform,
+        scam_type: analysisResult.scamType || 'Nghi vấn lừa đảo',
+        analysis: analysisResult.analysis || '',
+        messages_json: messagesToSave,
+        is_approved: false,
+      };
 
-    // Cố gắng chèn thêm attack_target, confidence_score và warning_points nếu DB đã có cột
-    let insertData = {
-      ...baseTemplate,
-      attack_target: analysisResult.attackTarget || 'Không rõ',
-      confidence_score: numScore,
-      warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
-    };
+      let insertData = {
+        ...baseTemplate,
+        attack_target: analysisResult.attackTarget || 'Không rõ',
+        confidence_score: numScore,
+        warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
+      };
 
-    let { data: savedTemplate, error: saveError } = await supabase
-      .from('scam_templates')
-      .insert(insertData)
-      .select('id')
-      .single();
-
-    // Nếu lỗi do cột chưa tồn tại, fallback chèn bản cơ sở
-    if (saveError) {
-      const fallbackResult = await supabase
+      let { data: savedTemplate, error: saveError } = await supabase
         .from('scam_templates')
-        .insert(baseTemplate)
+        .insert(insertData)
         .select('id')
         .single();
-      savedTemplate = fallbackResult.data;
-      if (fallbackResult.error) {
-        console.error('[Check] Failed to save template fallback:', fallbackResult.error.message);
-      }
-    }
 
-    if (savedTemplate?.id) {
-      savedTemplateId = savedTemplate.id;
-      console.log(`[Check] Scam template saved with id: ${savedTemplateId} (chưa được kiểm định)`);
+      if (saveError) {
+        const fallbackResult = await supabase
+          .from('scam_templates')
+          .insert(baseTemplate)
+          .select('id')
+          .single();
+        savedTemplate = fallbackResult.data;
+        if (fallbackResult.error) {
+          console.error('[Check] Failed to save template fallback:', fallbackResult.error.message);
+        }
+      }
+
+      if (savedTemplate?.id) {
+        savedTemplateId = savedTemplate.id;
+        console.log(`[Check] Scam template saved with id: ${savedTemplateId} (chưa được kiểm định)`);
+      }
+    } else {
+      // 2. Tin nhắn KHÔNG rủi ro: Lưu trữ lại để AI đối chiếu & đánh giá (KHÔNG hiện lên kho mẫu)
+      const safeTemplate = {
+        title: analysisResult.title || 'Tin nhắn an toàn / Bình thường',
+        platform,
+        scam_type: 'Tin nhắn an toàn / Bình thường',
+        analysis: analysisResult.analysis || 'Tin nhắn hợp lệ, không có dấu hiệu thao túng hay lừa đảo.',
+        messages_json: messagesToSave,
+        is_approved: true,
+      };
+
+      let insertSafeData = {
+        ...safeTemplate,
+        attack_target: 'Không có',
+        confidence_score: numScore,
+        warning_points: [],
+      };
+
+      try {
+        let { data: savedSafe, error: safeErr } = await supabase
+          .from('scam_templates')
+          .insert(insertSafeData)
+          .select('id')
+          .single();
+
+        if (safeErr) {
+          await supabase.from('scam_templates').insert(safeTemplate);
+        }
+        if (savedSafe?.id) {
+          savedTemplateId = savedSafe.id;
+        }
+        console.log(`[Check] Stored non-risk message for AI reference benchmark (score: ${numScore}%)`);
+      } catch (safeErr) {
+        console.warn('[Check] Could not save safe reference message:', safeErr.message);
+      }
     }
   }
 

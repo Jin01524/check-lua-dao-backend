@@ -84,6 +84,7 @@ export async function analyzeContent({
   platform = 'Không xác định',
   apiKey,
   fewShotExamples = [],
+  safeExamples = [],
 }) {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -95,7 +96,7 @@ export async function analyzeContent({
     },
   }));
 
-  // ── Build few-shot examples section ───────────────────────────────────────
+  // ── Build few-shot examples section (mẫu lừa đảo đối chiếu) ────────────────
   let fewShotSection = '';
   if (fewShotExamples && fewShotExamples.length > 0) {
     const examplesText = fewShotExamples
@@ -113,8 +114,31 @@ Phân tích: ${ex.analysis || ''}`;
 
     fewShotSection = `
 Dưới đây là một số ví dụ thực tế về các thủ đoạn lừa đảo đã được xác minh để đối chiếu:
----VÍ DỤ MẪU---
+---VÍ DỤ MẪU LỪA ĐẢO---
 ${examplesText}
+---
+`;
+  }
+
+  // ── Build safe examples section (mẫu an toàn để AI đối chiếu phân biệt) ────
+  let safeExamplesSection = '';
+  if (safeExamples && safeExamples.length > 0) {
+    const safeText = safeExamples
+      .map((ex, idx) => {
+        const messages = Array.isArray(ex.messages_json)
+          ? ex.messages_json.map((m) => `  [${m.sender}]: ${m.text}`).join('\n')
+          : '';
+        return `Mẫu an toàn ${idx + 1} - ${ex.title} (${ex.platform}):
+Nội dung hội thoại:
+${messages}
+Nhận định an toàn: ${ex.analysis || 'Tin nhắn hợp lệ, không có dấu hiệu lừa đảo'}`;
+      })
+      .join('\n\n---\n\n');
+
+    safeExamplesSection = `
+Dưới đây là các ví dụ về tin nhắn AN TOÀN / BÌNH THƯỜNG được hệ thống lưu trữ để đối chiếu (giúp tránh đánh giá nhầm):
+---VÍ DỤ TIN NHẮN AN TOÀN ĐỐI CHIẾU---
+${safeText}
 ---
 `;
   }
@@ -141,6 +165,7 @@ Thông tin đầu vào từ người dùng:
 - Số lượng ảnh chụp màn hình: ${imageParts.length}
 ${textInputSection}
 ${fewShotSection}
+${safeExamplesSection}
 
 NHIỆM VỤ GIÁM ĐỊNH:
 1. Xác định tính hợp lệ của dữ liệu đầu vào:
