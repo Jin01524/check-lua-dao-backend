@@ -244,6 +244,12 @@ function filterCurated(platform, search) {
  * Hàm tạo điểm rủi ro nhất quán từ 91% - 98% nếu thiếu dữ liệu trong DB
  */
 export function getConsistentScore(tpl) {
+  if (tpl?.scam_type === 'Tin nhắn an toàn / Bình thường' || tpl?.is_safe) {
+    if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
+      return Math.round(Number(tpl.confidence_score));
+    }
+    return 0;
+  }
   if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
     const s = Number(tpl.confidence_score);
     return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
