@@ -70,30 +70,32 @@ import { getSupabaseClient } from './lib/supabase.js';
       console.log('[Startup] ✅ Admin user ensured in Supabase database (username: admin, role: admin)');
     }
 
-    // Check if scam_templates has any templates
-    const { count, error: countErr } = await supabase
-      .from('scam_templates')
-      .select('*', { count: 'exact', head: true });
+    // Chỉ seed curated templates nếu người dùng bật cấu hình SEED_TEMPLATES=true
+    if (process.env.SEED_TEMPLATES === 'true') {
+      const { count, error: countErr } = await supabase
+        .from('scam_templates')
+        .select('*', { count: 'exact', head: true });
 
-    if (!countErr && (count === 0 || count === null)) {
-      console.log('[Startup] Seeding curated threat templates into scam_templates...');
-      for (const tpl of CURATED_TEMPLATES) {
-        await supabase
-          .from('scam_templates')
-          .insert({
-            title: tpl.title,
-            platform: tpl.platform,
-            scam_type: tpl.scam_type,
-            analysis: tpl.analysis,
-            attack_target: tpl.attack_target || 'Không rõ',
-            confidence_score: tpl.confidence_score || 95,
-            warning_points: tpl.warning_points || [],
-            messages_json: tpl.messages_json,
-            is_approved: true,
-          })
-          .catch(() => {});
+      if (!countErr && (count === 0 || count === null)) {
+        console.log('[Startup] Seeding curated threat templates into scam_templates...');
+        for (const tpl of CURATED_TEMPLATES) {
+          await supabase
+            .from('scam_templates')
+            .insert({
+              title: tpl.title,
+              platform: tpl.platform,
+              scam_type: tpl.scam_type,
+              analysis: tpl.analysis,
+              attack_target: tpl.attack_target || 'Không rõ',
+              confidence_score: tpl.confidence_score || 95,
+              warning_points: tpl.warning_points || [],
+              messages_json: tpl.messages_json,
+              is_approved: true,
+            })
+            .catch(() => {});
+        }
+        console.log('[Startup] ✅ Curated threat templates seeded successfully');
       }
-      console.log('[Startup] ✅ Curated threat templates seeded successfully');
     }
 
     // Đảm bảo bảng system_stats trong Supabase đã có bản ghi thống kê ban đầu

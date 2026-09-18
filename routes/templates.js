@@ -251,6 +251,11 @@ router.get('/', async (req, res) => {
         }));
         return res.json({ data: enriched, count: enriched.length });
       }
+
+      // Nếu database đã kết nối và bảng scam_templates rỗng (người dùng đã clear)
+      if (!error && Array.isArray(data) && data.length === 0) {
+        return res.json({ data: [], count: 0 });
+      }
     } catch (err) {
       console.warn('[Templates] Error reading from DB:', err.message);
     }

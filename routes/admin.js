@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from '../lib/supabase.js';
 import authMiddleware from '../middleware/auth.js';
 import { getConsistentScore, CURATED_TEMPLATES } from './templates.js';
+import { sessionStats } from './stats.js';
 
 const router = express.Router();
 
@@ -648,6 +649,61 @@ router.delete('/users/:id', async (req, res) => {
   }
 
   res.json({ message: 'Tài khoản đã được xóa' });
+});
+
+/**
+ * POST /api/admin/clear-data
+ * Xóa sạch dữ liệu trong database: scam_templates, scan_logs và reset system_stats về 0
+ */
+router.post('/clear-data', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Chỉ Quản trị viên mới có quyền xóa dữ liệu hệ thống' });
+  }
+
+  let supabase = null;
+  try {
+    supabase = getSupabaseClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Database chưa sẵn sàng: ' + err.message });
+  }
+
+  // 1. Xóa dữ liệu bảng scam_templates
+  const { error: tplErr } = await supabase
+    .from('scam_templates')
+    .delete()
+    .gte('created_at', '1970-01-01');
+
+  // 2. Xóa dữ liệu bảng scan_logs
+  const { error: logErr } = await supabase
+    .from('scan_logs')
+    .delete()
+    .gte('created_at', '1970-01-01');
+
+  // 3. Reset bảng system_stats về 0
+  const { error: statsErr } = await supabase
+    .from('system_stats')
+    .upsert({
+      id: 'global',
+      total_scans: 0,
+      warned_scans: 0,
+      max_confidence: 0,
+      updated_at: new Date().toISOString(),
+    });
+
+  // 4. Reset bộ đếm in-memory
+  sessionStats.sessionScans = 0;
+  sessionStats.sessionWarned = 0;
+  sessionStats.sessionMaxConfidence = 0;
+
+  if (tplErr || logErr || statsErr) {
+    const errors = [tplErr?.message, logErr?.message, statsErr?.message].filter(Boolean).join('; ');
+    return res.status(500).json({ error: 'Có lỗi khi xóa dữ liệu trong Supabase: ' + errors });
+  }
+
+  res.json({
+    message: 'Đã xóa toàn bộ dữ liệu tin nhắn mẫu, nhật ký quét và reset bộ đếm thống kê về 0',
+    stats: { totalScans: 0, warnedScans: 0, maxConfidence: 0 }
+  });
 });
 
 export default router;
