@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS scan_logs (
 -- Bảng lưu số liệu thống kê hệ thống (đồng bộ trong database Supabase)
 CREATE TABLE IF NOT EXISTS system_stats (
   id TEXT PRIMARY KEY DEFAULT 'global',
-  total_scans INTEGER DEFAULT 6,
-  warned_scans INTEGER DEFAULT 6,
+  total_scans INTEGER DEFAULT 16,
+  warned_scans INTEGER DEFAULT 16,
   max_confidence INTEGER DEFAULT 98,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -78,10 +78,12 @@ ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE system_stats DISABLE ROW LEVEL SECURITY;
 
--- Khởi tạo số liệu mặc định cho system_stats nếu chưa có
+-- Khởi tạo số liệu mặc định cho system_stats nếu chưa có (16 tin nhắn mẫu cơ sở)
 INSERT INTO system_stats (id, total_scans, warned_scans, max_confidence)
-VALUES ('global', 6, 6, 98)
-ON CONFLICT (id) DO NOTHING;
+VALUES ('global', 16, 16, 98)
+ON CONFLICT (id) DO UPDATE
+SET total_scans = GREATEST(system_stats.total_scans, 16),
+    warned_scans = GREATEST(system_stats.warned_scans, 16);
 
 -- Thêm API Key Gemini mặc định nếu chưa có
 INSERT INTO api_keys (key, label, is_active)

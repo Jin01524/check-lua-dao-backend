@@ -1,5 +1,6 @@
 import express from 'express';
 import { getSupabaseClient } from '../lib/supabase.js';
+import { CURATED_TEMPLATES } from './templates.js';
 
 const router = express.Router();
 
@@ -10,8 +11,26 @@ export const sessionStats = {
   sessionMaxConfidence: 0,
 };
 
-const BASE_SCANS = 6;
-const BASE_WARNED = 6;
+/**
+ * Đếm tổng số lượng tin nhắn thực tế nằm trong các mẫu tin nhắn (messages_json)
+ */
+export function getTemplateMessagesCount(templates) {
+  const source = Array.isArray(templates) && templates.length > 0 ? templates : CURATED_TEMPLATES;
+  return source.reduce((sum, t) => {
+    if (!t) return sum;
+    let msgs = t.messages_json;
+    if (typeof msgs === 'string') {
+      try {
+        msgs = JSON.parse(msgs);
+      } catch (_) {
+        msgs = [];
+      }
+    }
+    return sum + (Array.isArray(msgs) && msgs.length > 0 ? msgs.length : 1);
+  }, 0);
+}
+
+const DEFAULT_BASE_COUNT = getTemplateMessagesCount(CURATED_TEMPLATES); // 16 tin nhắn mẫu
 const BASE_MAX = 98;
 
 /**
@@ -94,18 +113,29 @@ export async function recordScanInDB({ platform, isScam, confidenceScore, scamTy
     const actualLogs = typeof logCount === 'number' ? logCount : (scanLogInserted ? 1 : 0);
     const actualWarnLogs = typeof warnLogCount === 'number' ? warnLogCount : (isScam ? 1 : 0);
 
-    // Mức cơ sở ban đầu
-    let currentTotal = BASE_SCANS;
-    let currentWarned = BASE_WARNED;
+    // Lấy tổng số tin nhắn thực tế nằm trong các mẫu tin nhắn (messages_json)
+    let baseTemplateMessages = DEFAULT_BASE_COUNT;
+    try {
+      const { data: tplData } = await supabase
+        .from('scam_templates')
+        .select('messages_json');
+      if (tplData && tplData.length > 0) {
+        baseTemplateMessages = Math.max(getTemplateMessagesCount(tplData), DEFAULT_BASE_COUNT);
+      }
+    } catch (_) {}
+
+    // Mức cơ sở ban đầu từ tổng số tin nhắn mẫu
+    let currentTotal = baseTemplateMessages;
+    let currentWarned = baseTemplateMessages;
     let currentMax = BASE_MAX;
 
     if (currentStats) {
-      currentTotal = Math.max(Number(currentStats.total_scans) || BASE_SCANS, BASE_SCANS);
-      currentWarned = Math.max(Number(currentStats.warned_scans) || BASE_WARNED, BASE_WARNED);
+      currentTotal = Math.max(Number(currentStats.total_scans) || baseTemplateMessages, baseTemplateMessages);
+      currentWarned = Math.max(Number(currentStats.warned_scans) || baseTemplateMessages, baseTemplateMessages);
       currentMax = Math.max(Number(currentStats.max_confidence) || BASE_MAX, BASE_MAX);
     } else {
-      currentTotal = BASE_SCANS + Math.max(0, actualLogs - 1);
-      currentWarned = BASE_WARNED + Math.max(0, actualWarnLogs - (isScam ? 1 : 0));
+      currentTotal = baseTemplateMessages + Math.max(0, actualLogs - 1);
+      currentWarned = baseTemplateMessages + Math.max(0, actualWarnLogs - (isScam ? 1 : 0));
     }
 
     // Tăng chính xác +1 lượt quét mới
@@ -150,6 +180,7 @@ export async function getSystemStatsFromDB() {
   let hasSystemStatsRow = false;
   let actualLogCount = 0;
   let actualWarnCount = 0;
+  let baseTemplateMessages = DEFAULT_BASE_COUNT;
 
   if (supabase) {
     // 1. Đọc từ bảng system_stats
@@ -203,15 +234,31 @@ export async function getSystemStatsFromDB() {
     } catch (err) {
       console.warn('[Stats] Could not query scan_logs:', err.message);
     }
+
+    // 3. Đọc từ scam_templates để lấy tổng số tin nhắn thực tế nằm trong các mẫu
+    try {
+      const { data: tplData } = await supabase
+        .from('scam_templates')
+        .select('messages_json');
+
+      if (tplData && tplData.length > 0) {
+        baseTemplateMessages = Math.max(getTemplateMessagesCount(tplData), DEFAULT_BASE_COUNT);
+      }
+    } catch (err) {
+      console.warn('[Stats] Could not query scam_templates messages:', err.message);
+    }
   }
 
   // Số lượng quét tăng thêm thực tế: lấy giá trị lớn nhất giữa số log trong DB và số lượt quét trong session
   const additionalScans = Math.max(actualLogCount, sessionStats.sessionScans);
   const additionalWarned = Math.max(actualWarnCount, sessionStats.sessionWarned);
 
-  // Tổng số tin nhắn đã quét = max giữa giá trị lưu trong system_stats và (BASE_SCANS + additionalScans)
-  const totalScans = Math.max(dbTotal, BASE_SCANS + additionalScans);
-  const warnedScans = Math.max(dbWarned, BASE_WARNED + additionalWarned);
+  const baseScans = Math.max(baseTemplateMessages, DEFAULT_BASE_COUNT);
+  const baseWarned = Math.max(baseTemplateMessages, DEFAULT_BASE_COUNT);
+
+  // Tổng số tin nhắn đã quét và được cảnh báo
+  const totalScans = Math.max(dbTotal, baseScans + additionalScans);
+  const warnedScans = Math.max(dbWarned, baseWarned + additionalWarned);
   const maxConfidence = Math.max(dbMaxConfidence, BASE_MAX, sessionStats.sessionMaxConfidence);
 
   // Nếu bảng system_stats đã tồn tại trong Supabase mà số liệu đang thấp hơn số liệu tính toán, tự động đồng bộ lên

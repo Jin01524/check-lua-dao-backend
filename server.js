@@ -52,7 +52,7 @@ import authRoutes from './routes/auth.js';
 import checkRoutes from './routes/check.js';
 import templatesRoutes, { CURATED_TEMPLATES } from './routes/templates.js';
 import adminRoutes from './routes/admin.js';
-import statsRoutes from './routes/stats.js';
+import statsRoutes, { getTemplateMessagesCount } from './routes/stats.js';
 import { getSupabaseClient } from './lib/supabase.js';
 
 // Auto-seed admin user and curated templates in Supabase if connected
@@ -106,8 +106,9 @@ import { getSupabaseClient } from './lib/supabase.js';
 
       if (!statsRow) {
         const { count: logCount } = await supabase.from('scan_logs').select('*', { count: 'exact', head: true });
-        const { count: tplCount } = await supabase.from('scam_templates').select('*', { count: 'exact', head: true });
-        const initialCount = Math.max(Number(logCount) || 0, Number(tplCount) || 0, 6);
+        const { data: tplData } = await supabase.from('scam_templates').select('messages_json');
+        const templateMsgs = getTemplateMessagesCount(tplData);
+        const initialCount = Math.max(templateMsgs, 16) + (Number(logCount) || 0);
 
         await supabase.from('system_stats').upsert({
           id: 'global',
