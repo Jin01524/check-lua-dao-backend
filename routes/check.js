@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
-import { sessionStats } from './stats.js';
+import { recordScanInDB, sessionStats } from './stats.js';
 
 const router = express.Router();
 
@@ -190,30 +190,13 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     }
   }
 
-  // ── Ghi nhận số liệu thống kê thực tế ────────────────────────────────────
-  sessionStats.sessionScans += 1;
-  if (analysisResult.isScam) {
-    sessionStats.sessionWarned += 1;
-  }
-  if (analysisResult.confidenceScore) {
-    sessionStats.sessionMaxConfidence = Math.max(
-      sessionStats.sessionMaxConfidence,
-      analysisResult.confidenceScore
-    );
-  }
-
-  // Ghi log vào bảng scan_logs (không chặn request nếu bảng chưa tạo)
-  supabase
-    .from('scan_logs')
-    .insert({
-      platform,
-      is_scam: Boolean(analysisResult.isScam),
-      confidence_score: Number(analysisResult.confidenceScore) || 0,
-    })
-    .then(() => {})
-    .catch((err) => {
-      console.warn('[Check] Could not save to scan_logs:', err.message);
-    });
+  // ── Ghi nhận số liệu thống kê thực tế vào database Supabase ─────────────
+  await recordScanInDB({
+    platform,
+    isScam: Boolean(analysisResult.isScam),
+    confidenceScore: Number(analysisResult.confidenceScore) || 0,
+    scamType: analysisResult.scamType || null,
+  });
 
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   res.json({

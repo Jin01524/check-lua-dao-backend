@@ -95,6 +95,34 @@ import { getSupabaseClient } from './lib/supabase.js';
       }
       console.log('[Startup] ✅ Curated threat templates seeded successfully');
     }
+
+    // Đảm bảo bảng system_stats trong Supabase đã có bản ghi thống kê ban đầu
+    try {
+      const { data: statsRow } = await supabase
+        .from('system_stats')
+        .select('*')
+        .eq('id', 'global')
+        .maybeSingle();
+
+      if (!statsRow) {
+        const { count: logCount } = await supabase.from('scan_logs').select('*', { count: 'exact', head: true });
+        const { count: tplCount } = await supabase.from('scam_templates').select('*', { count: 'exact', head: true });
+        const initialCount = Math.max(Number(logCount) || 0, Number(tplCount) || 0, 6);
+
+        await supabase.from('system_stats').upsert({
+          id: 'global',
+          total_scans: initialCount,
+          warned_scans: initialCount,
+          max_confidence: 98,
+          updated_at: new Date().toISOString(),
+        });
+        console.log(`[Startup] ✅ system_stats initialized in Supabase with initial count = ${initialCount}`);
+      } else {
+        console.log(`[Startup] ✅ system_stats verified in Supabase: total_scans = ${statsRow.total_scans}`);
+      }
+    } catch (statsInitErr) {
+      console.warn('[Startup] Note: system_stats table not yet initialized in Supabase:', statsInitErr.message);
+    }
   } catch (e) {
     // Graceful silent skip if Supabase not yet configured locally
   }

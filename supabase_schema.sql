@@ -51,7 +51,17 @@ CREATE TABLE IF NOT EXISTS scan_logs (
   platform TEXT,
   is_scam BOOLEAN DEFAULT false,
   confidence_score INTEGER DEFAULT 0,
+  scam_type TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Bảng lưu số liệu thống kê hệ thống (đồng bộ trong database Supabase)
+CREATE TABLE IF NOT EXISTS system_stats (
+  id TEXT PRIMARY KEY DEFAULT 'global',
+  total_scans INTEGER DEFAULT 6,
+  warned_scans INTEGER DEFAULT 6,
+  max_confidence INTEGER DEFAULT 98,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Index để query nhanh hơn
@@ -66,6 +76,12 @@ ALTER TABLE api_keys DISABLE ROW LEVEL SECURITY;
 ALTER TABLE scam_templates DISABLE ROW LEVEL SECURITY;
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE system_stats DISABLE ROW LEVEL SECURITY;
+
+-- Khởi tạo số liệu mặc định cho system_stats nếu chưa có
+INSERT INTO system_stats (id, total_scans, warned_scans, max_confidence)
+VALUES ('global', 6, 6, 98)
+ON CONFLICT (id) DO NOTHING;
 
 -- Thêm API Key Gemini mặc định nếu chưa có
 INSERT INTO api_keys (key, label, is_active)
