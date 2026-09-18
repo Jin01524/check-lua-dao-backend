@@ -145,15 +145,23 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     return res.status(500).json({ error: `Phân tích thất bại: ${errorMsg}` });
   }
 
-  // ── Nếu là lừa đảo: lưu vào DB (chờ phê duyệt) ──────────────────────────
+  // ── Nếu đạt mức rủi ro / lừa đảo: lưu vào DB (trạng thái Chưa kiểm định is_approved = false) ──
   let savedTemplateId = null;
-  if (analysisResult.isChatScreenshot && analysisResult.isScam && analysisResult.title) {
+  const numScore = Number(analysisResult.confidenceScore) || 0;
+  const hasRisk = Boolean(analysisResult.isScam) || numScore >= 40;
+  const hasContent = Boolean(analysisResult.isChatScreenshot) || Boolean(textContent) || files.length > 0;
+
+  if (hasRisk && hasContent && (analysisResult.title || analysisResult.scamType)) {
+    const messagesToSave = Array.isArray(analysisResult.messages) && analysisResult.messages.length > 0
+      ? analysisResult.messages
+      : (textContent ? [{ sender: 'scammer', text: textContent }] : []);
+
     const baseTemplate = {
-      title: analysisResult.title,
+      title: analysisResult.title || analysisResult.scamType || 'Nghi vấn tin nhắn lừa đảo mới',
       platform,
-      scam_type: analysisResult.scamType,
-      analysis: analysisResult.analysis,
-      messages_json: analysisResult.messages,
+      scam_type: analysisResult.scamType || 'Nghi vấn lừa đảo',
+      analysis: analysisResult.analysis || '',
+      messages_json: messagesToSave,
       is_approved: false,
     };
 
@@ -161,8 +169,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     let insertData = {
       ...baseTemplate,
       attack_target: analysisResult.attackTarget || 'Không rõ',
-      confidence_score: analysisResult.confidenceScore,
-      warning_points: analysisResult.warningPoints,
+      confidence_score: numScore,
+      warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
     };
 
     let { data: savedTemplate, error: saveError } = await supabase
@@ -186,7 +194,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
 
     if (savedTemplate?.id) {
       savedTemplateId = savedTemplate.id;
-      console.log(`[Check] Scam template saved with id: ${savedTemplateId} (pending approval)`);
+      console.log(`[Check] Scam template saved with id: ${savedTemplateId} (chưa được kiểm định)`);
     }
   }
 

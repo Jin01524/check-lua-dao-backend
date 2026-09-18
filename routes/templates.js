@@ -280,10 +280,16 @@ router.get('/', async (req, res) => {
     try {
       let query = supabase
         .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, created_at')
-        .eq('is_approved', true)
+        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, is_approved, created_at')
         .order('created_at', { ascending: false })
         .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+      // Cho phép lọc theo approved nếu query có truyền vào (mặc định lấy tất cả các mẫu đạt rủi ro)
+      if (req.query.approved === 'true') {
+        query = query.eq('is_approved', true);
+      } else if (req.query.approved === 'false') {
+        query = query.eq('is_approved', false);
+      }
 
       if (platform && platform.toUpperCase() !== 'ALL') {
         query = query.ilike('platform', `%${platform}%`);
@@ -301,10 +307,15 @@ router.get('/', async (req, res) => {
         console.warn('[Templates] Advanced query failed, falling back to basic columns:', error.message);
         let basicQuery = supabase
           .from('scam_templates')
-          .select('id, title, platform, scam_type, analysis, created_at')
-          .eq('is_approved', true)
+          .select('id, title, platform, scam_type, analysis, is_approved, created_at')
           .order('created_at', { ascending: false })
           .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+        if (req.query.approved === 'true') {
+          basicQuery = basicQuery.eq('is_approved', true);
+        } else if (req.query.approved === 'false') {
+          basicQuery = basicQuery.eq('is_approved', false);
+        }
 
         if (platform && platform.toUpperCase() !== 'ALL') {
           basicQuery = basicQuery.ilike('platform', `%${platform}%`);
@@ -329,6 +340,7 @@ router.get('/', async (req, res) => {
           attack_target: item.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(item),
           warning_points: item.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+          is_approved: Boolean(item.is_approved),
         }));
         return res.json({ data: enriched, count: enriched.length });
       }
@@ -382,6 +394,7 @@ router.get('/:id', async (req, res) => {
           attack_target: data.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(data),
           warning_points: data.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+          is_approved: Boolean(data.is_approved),
         };
         return res.json({ data: enriched });
       }
