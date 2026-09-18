@@ -119,13 +119,11 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   ]
 }`;
 
-  // ── Call Gemini API with Fallback Models ────────────────────────────────────
+  // ── Call Gemini API (Chỉ sử dụng model Gemini 3.1 Flash Lite) ──────────────
   const candidateModels = [
-    process.env.GEMINI_MODEL,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-  ].filter(Boolean);
+    'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-lite-preview',
+  ];
 
   let lastModelError = null;
   let response = null;
