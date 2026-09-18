@@ -102,7 +102,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   "title": "Tiêu đề ngắn gọn hồ sơ vụ việc",
   "attackTarget": "Mục tiêu tấn công cụ thể của kẻ gian (ví dụ: Tài khoản ngân hàng & Mã OTP, Tiền chuyển khoản, Cướp SIM điện thoại, Quyền kiểm soát thiết bị Android, Thông tin danh tính cá nhân). Nếu không rõ hoặc không xác định được thì ghi là 'Không rõ'.",
   "confidenceScore": 94,
-  "analysis": "Phân tích chi tiết thủ đoạn tấn công và cơ chế thao túng tâm lý",
+  "analysis": "Phân tích chi tiết thủ đoạn tấn công và cơ chế thao túng tâm lý, liệt kê từng ý ngắn gọn",
   "warningPoints": [
     "Dấu hiệu cảnh báo 1",
     "Dấu hiệu cảnh báo 2"
