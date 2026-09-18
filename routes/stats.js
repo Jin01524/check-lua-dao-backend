@@ -10,6 +10,10 @@ export const sessionStats = {
   sessionMaxConfidence: 0,
 };
 
+const BASE_SCANS = 6;
+const BASE_WARNED = 6;
+const BASE_MAX = 98;
+
 /**
  * Ghi nhận một lượt quét mới vào database Supabase
  * Đồng bộ cả bảng chi tiết scan_logs và bảng tổng hợp system_stats
@@ -22,43 +26,54 @@ export async function recordScanInDB({ platform, isScam, confidenceScore, scamTy
     console.warn('[Stats] Supabase client not initialized:', err.message);
   }
 
-  // Luôn cập nhật memory counter dự phòng
+  // 1. Luôn cập nhật memory counter dự phòng
   sessionStats.sessionScans += 1;
   if (isScam) {
     sessionStats.sessionWarned += 1;
   }
-  if (confidenceScore) {
+  const numConfidence = Number(confidenceScore) || 0;
+  if (numConfidence > 0) {
     sessionStats.sessionMaxConfidence = Math.max(
       sessionStats.sessionMaxConfidence,
-      Number(confidenceScore) || 0
+      numConfidence
     );
   }
 
   if (!supabase) return;
 
-  const numConfidence = Number(confidenceScore) || 0;
-
-  // 1. Ghi nhận vào bảng scan_logs (nhật ký từng lượt quét chi tiết trong Supabase)
+  // 2. Ghi nhận vào bảng scan_logs (nhật ký từng lượt quét trong Supabase)
+  let scanLogInserted = false;
   try {
-    const { error: logErr } = await supabase.from('scan_logs').insert({
+    let { error: logErr } = await supabase.from('scan_logs').insert({
       platform: platform || 'SMS',
       is_scam: Boolean(isScam),
       confidence_score: numConfidence,
       scam_type: scamType || null,
     });
 
+    // Fallback: nếu Supabase chưa có cột scam_type
+    if (logErr && (logErr.message?.includes('scam_type') || logErr.code === '42703')) {
+      const retryResult = await supabase.from('scan_logs').insert({
+        platform: platform || 'SMS',
+        is_scam: Boolean(isScam),
+        confidence_score: numConfidence,
+      });
+      logErr = retryResult.error;
+    }
+
     if (logErr) {
       console.warn('[Stats] Could not insert into scan_logs in Supabase:', logErr.message);
     } else {
+      scanLogInserted = true;
       console.log('[Stats] ✅ Saved scan record into Supabase scan_logs');
     }
   } catch (err) {
     console.warn('[Stats] Exception inserting into scan_logs:', err.message);
   }
 
-  // 2. Cập nhật bảng tổng hợp system_stats trong Supabase
+  // 3. Cập nhật bảng tổng hợp system_stats trong Supabase
   try {
-    // Đọc thống kê hiện tại từ system_stats
+    // Đọc số liệu hiện tại từ system_stats
     const { data: currentStats } = await supabase
       .from('system_stats')
       .select('*')
@@ -70,19 +85,33 @@ export async function recordScanInDB({ platform, isScam, confidenceScore, scamTy
       .from('scan_logs')
       .select('*', { count: 'exact', head: true });
 
-    // Đếm số lượng mẫu từ scam_templates
-    const { count: tplCount } = await supabase
-      .from('scam_templates')
-      .select('*', { count: 'exact', head: true });
+    // Đếm số lượng log bị cảnh báo
+    const { count: warnLogCount } = await supabase
+      .from('scan_logs')
+      .select('*', { count: 'exact', head: true })
+      .or('is_scam.eq.true,confidence_score.gte.50');
 
-    const baseCount = Math.max(Number(tplCount) || 0, 6);
-    const existingTotal = currentStats ? Number(currentStats.total_scans) : Math.max(Number(logCount) || 0, baseCount);
-    const existingWarned = currentStats ? Number(currentStats.warned_scans) : Math.max(baseCount, isScam ? 1 : 0);
-    const existingMax = currentStats ? Number(currentStats.max_confidence) : 98;
+    const actualLogs = typeof logCount === 'number' ? logCount : (scanLogInserted ? 1 : 0);
+    const actualWarnLogs = typeof warnLogCount === 'number' ? warnLogCount : (isScam ? 1 : 0);
 
-    const newTotal = existingTotal + 1;
-    const newWarned = existingWarned + (isScam ? 1 : 0);
-    const newMax = Math.max(existingMax, numConfidence);
+    // Mức cơ sở ban đầu
+    let currentTotal = BASE_SCANS;
+    let currentWarned = BASE_WARNED;
+    let currentMax = BASE_MAX;
+
+    if (currentStats) {
+      currentTotal = Math.max(Number(currentStats.total_scans) || BASE_SCANS, BASE_SCANS);
+      currentWarned = Math.max(Number(currentStats.warned_scans) || BASE_WARNED, BASE_WARNED);
+      currentMax = Math.max(Number(currentStats.max_confidence) || BASE_MAX, BASE_MAX);
+    } else {
+      currentTotal = BASE_SCANS + Math.max(0, actualLogs - 1);
+      currentWarned = BASE_WARNED + Math.max(0, actualWarnLogs - (isScam ? 1 : 0));
+    }
+
+    // Tăng chính xác +1 lượt quét mới
+    const newTotal = currentTotal + 1;
+    const newWarned = currentWarned + (isScam ? 1 : 0);
+    const newMax = Math.max(currentMax, numConfidence);
 
     const { error: statsErr } = await supabase
       .from('system_stats')
@@ -118,7 +147,9 @@ export async function getSystemStatsFromDB() {
   let dbTotal = 0;
   let dbWarned = 0;
   let dbMaxConfidence = 0;
-  let foundSystemStats = false;
+  let hasSystemStatsRow = false;
+  let actualLogCount = 0;
+  let actualWarnCount = 0;
 
   if (supabase) {
     // 1. Đọc từ bảng system_stats
@@ -130,7 +161,7 @@ export async function getSystemStatsFromDB() {
         .maybeSingle();
 
       if (!statsErr && statsRow) {
-        foundSystemStats = true;
+        hasSystemStatsRow = true;
         dbTotal = Number(statsRow.total_scans) || 0;
         dbWarned = Number(statsRow.warned_scans) || 0;
         dbMaxConfidence = Number(statsRow.max_confidence) || 0;
@@ -139,14 +170,14 @@ export async function getSystemStatsFromDB() {
       console.warn('[Stats] Could not query system_stats:', err.message);
     }
 
-    // 2. Kiểm tra thực tế từ scan_logs
+    // 2. Đọc từ scan_logs
     try {
       const { count: logCount, error: logErr } = await supabase
         .from('scan_logs')
         .select('*', { count: 'exact', head: true });
 
       if (!logErr && typeof logCount === 'number') {
-        dbTotal = Math.max(dbTotal, logCount);
+        actualLogCount = logCount;
       }
 
       // Đếm tin nhắn cảnh báo trong scan_logs (lừa đảo hoặc điểm rủi ro >= 50%)
@@ -156,7 +187,7 @@ export async function getSystemStatsFromDB() {
         .or('is_scam.eq.true,confidence_score.gte.50');
 
       if (!warnErr && typeof warnCount === 'number') {
-        dbWarned = Math.max(dbWarned, warnCount);
+        actualWarnCount = warnCount;
       }
 
       // Lấy max confidence từ scan_logs
@@ -172,54 +203,31 @@ export async function getSystemStatsFromDB() {
     } catch (err) {
       console.warn('[Stats] Could not query scan_logs:', err.message);
     }
-
-    // 3. Đọc từ bảng scam_templates
-    try {
-      const { count: templateCount } = await supabase
-        .from('scam_templates')
-        .select('*', { count: 'exact', head: true });
-
-      if (typeof templateCount === 'number') {
-        dbWarned = Math.max(dbWarned, templateCount);
-        dbTotal = Math.max(dbTotal, templateCount);
-      }
-
-      const { data: maxTplData } = await supabase
-        .from('scam_templates')
-        .select('confidence_score')
-        .order('confidence_score', { ascending: false })
-        .limit(1);
-
-      if (maxTplData && maxTplData[0]?.confidence_score) {
-        dbMaxConfidence = Math.max(dbMaxConfidence, maxTplData[0].confidence_score);
-      }
-    } catch (err) {
-      console.warn('[Stats] Could not query scam_templates:', err.message);
-    }
-
-    // Tự động đồng bộ số liệu chuẩn vào system_stats nếu chưa có hoặc đang thấp hơn
-    if (foundSystemStats && (dbTotal > 0 || dbWarned > 0)) {
-      const ensuredTotal = Math.max(dbTotal, 6);
-      const ensuredWarned = Math.max(dbWarned, 6);
-      const ensuredMax = Math.max(dbMaxConfidence, 98);
-      supabase
-        .from('system_stats')
-        .upsert({
-          id: 'global',
-          total_scans: ensuredTotal,
-          warned_scans: ensuredWarned,
-          max_confidence: ensuredMax,
-          updated_at: new Date().toISOString(),
-        })
-        .then(() => {})
-        .catch(() => {});
-    }
   }
 
-  // Cơ sở tối thiểu: 6 mẫu, 98% max
-  const totalScans = Math.max(dbTotal, 6, sessionStats.sessionScans);
-  const warnedScans = Math.max(dbWarned, 6, sessionStats.sessionWarned);
-  const maxConfidence = Math.max(dbMaxConfidence, 98, sessionStats.sessionMaxConfidence);
+  // Số lượng quét tăng thêm thực tế: lấy giá trị lớn nhất giữa số log trong DB và số lượt quét trong session
+  const additionalScans = Math.max(actualLogCount, sessionStats.sessionScans);
+  const additionalWarned = Math.max(actualWarnCount, sessionStats.sessionWarned);
+
+  // Tổng số tin nhắn đã quét = max giữa giá trị lưu trong system_stats và (BASE_SCANS + additionalScans)
+  const totalScans = Math.max(dbTotal, BASE_SCANS + additionalScans);
+  const warnedScans = Math.max(dbWarned, BASE_WARNED + additionalWarned);
+  const maxConfidence = Math.max(dbMaxConfidence, BASE_MAX, sessionStats.sessionMaxConfidence);
+
+  // Nếu bảng system_stats đã tồn tại trong Supabase mà số liệu đang thấp hơn số liệu tính toán, tự động đồng bộ lên
+  if (hasSystemStatsRow && (totalScans > dbTotal || warnedScans > dbWarned || maxConfidence > dbMaxConfidence)) {
+    supabase
+      .from('system_stats')
+      .upsert({
+        id: 'global',
+        total_scans: totalScans,
+        warned_scans: warnedScans,
+        max_confidence: maxConfidence,
+        updated_at: new Date().toISOString(),
+      })
+      .then(() => {})
+      .catch(() => {});
+  }
 
   return {
     totalScans,

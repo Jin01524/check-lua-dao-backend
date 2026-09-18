@@ -191,12 +191,16 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   }
 
   // ── Ghi nhận số liệu thống kê thực tế vào database Supabase ─────────────
-  await recordScanInDB({
-    platform,
-    isScam: Boolean(analysisResult.isScam),
-    confidenceScore: Number(analysisResult.confidenceScore) || 0,
-    scamType: analysisResult.scamType || null,
-  });
+  try {
+    await recordScanInDB({
+      platform,
+      isScam: Boolean(analysisResult.isScam),
+      confidenceScore: Number(analysisResult.confidenceScore) || 0,
+      scamType: analysisResult.scamType || null,
+    });
+  } catch (statErr) {
+    console.warn('[Check] Could not record scan stats:', statErr.message);
+  }
 
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   res.json({
