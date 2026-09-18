@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from '../lib/supabase.js';
 import authMiddleware from '../middleware/auth.js';
 import { getConsistentScore, CURATED_TEMPLATES } from './templates.js';
-import { sessionStats } from './stats.js';
+import { sessionStats, cachedStats } from './stats.js';
 
 const router = express.Router();
 
@@ -694,6 +694,9 @@ router.post('/clear-data', async (req, res) => {
   sessionStats.sessionScans = 0;
   sessionStats.sessionWarned = 0;
   sessionStats.sessionMaxConfidence = 0;
+  cachedStats.totalScans = 0;
+  cachedStats.warnedScans = 0;
+  cachedStats.maxConfidence = 0;
 
   if (tplErr || logErr || statsErr) {
     const errors = [tplErr?.message, logErr?.message, statsErr?.message].filter(Boolean).join('; ');
