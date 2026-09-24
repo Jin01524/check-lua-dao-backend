@@ -51,7 +51,7 @@ export async function extractTextWithGoogleVision(files = [], apiKey) {
 
     if (!response.ok || data.error) {
       const errMsg = data.error?.message || `HTTP ${response.status}`;
-      console.warn(`[GoogleVisionOCR] Không thể gọi Cloud Vision API (${errMsg}). Chuyển sang cơ chế dự phòng.`);
+      console.warn(`[GoogleVisionOCR] Lỗi từ Cloud Vision API (${errMsg}).`);
       return { success: false, extractedText: '', error: errMsg };
     }
 

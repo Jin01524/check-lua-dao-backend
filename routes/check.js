@@ -117,17 +117,23 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     console.warn('[Check] Could not fetch safe reference examples:', err.message);
   }
 
-  // ── Bước 1: Trích xuất văn bản chuẩn xác cao qua Google Cloud Vision OCR ──
+  // ── Bước 1: Trích xuất văn bản độc quyền qua Google Cloud Vision OCR (KHÔNG DÙNG FALLBACK) ──
   let ocrExtractedText = '';
   let ocrUsed = false;
   if (files.length > 0) {
     const primaryKey = shuffledKeys[0]?.key;
     const ocrRes = await extractTextWithGoogleVision(files, primaryKey);
-    if (ocrRes.success && ocrRes.extractedText) {
-      ocrExtractedText = ocrRes.extractedText;
-      ocrUsed = true;
-      console.log(`[Check] Google Cloud Vision OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
+    if (!ocrRes.success || !ocrRes.extractedText) {
+      const detail = ocrRes.error ? `: ${ocrRes.error}` : '';
+      console.error('[Check] Google Cloud Vision OCR thất bại và fallback đã bị tắt:', ocrRes.error);
+      return res.status(400).json({
+        error: `Google Cloud Vision OCR không trích xuất được văn bản${detail}. Cơ chế dự phòng (fallback) đã bị tắt theo yêu cầu hệ thống.`,
+      });
     }
+
+    ocrExtractedText = ocrRes.extractedText;
+    ocrUsed = true;
+    console.log(`[Check] Google Cloud Vision OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
   }
 
   // Kết hợp nội dung text người dùng nhập và văn bản bóc tách từ Google Vision
@@ -138,7 +144,12 @@ router.post('/', upload.array('images', 5), async (req, res) => {
       : `[Văn bản trích xuất nguyên vẹn qua Google Cloud Vision OCR]:\n${ocrExtractedText}`;
   }
 
+  if (!effectiveTextContent.trim()) {
+    return res.status(400).json({ error: 'Không tìm thấy nội dung văn bản nào để AI phân tích.' });
+  }
+
   // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
+  // ĐÃ TẮT FALLBACK: Không gửi file ảnh lên Gemini (imageFiles: []), 100% xử lý text-only từ Google Vision
   let analysisResult = null;
   let lastError = null;
 
@@ -146,7 +157,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     try {
       console.log(`[Check] Attempting analysis with key: ${keyObj.label} (${keyObj.id})`);
       analysisResult = await analyzeContent({
-        imageFiles: files,
+        imageFiles: [], // KHÔNG gửi ảnh cho Gemini Vision
         textContent: effectiveTextContent,
         platform,
         apiKey: keyObj.key,
