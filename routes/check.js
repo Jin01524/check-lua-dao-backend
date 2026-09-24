@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
+import { extractTextWithGoogleVision } from '../services/visionOcrService.js';
 import { recordScanInDB, sessionStats } from './stats.js';
 
 const router = express.Router();
@@ -116,6 +117,27 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     console.warn('[Check] Could not fetch safe reference examples:', err.message);
   }
 
+  // ── Bước 1: Trích xuất văn bản chuẩn xác cao qua Google Cloud Vision OCR ──
+  let ocrExtractedText = '';
+  let ocrUsed = false;
+  if (files.length > 0) {
+    const primaryKey = shuffledKeys[0]?.key;
+    const ocrRes = await extractTextWithGoogleVision(files, primaryKey);
+    if (ocrRes.success && ocrRes.extractedText) {
+      ocrExtractedText = ocrRes.extractedText;
+      ocrUsed = true;
+      console.log(`[Check] Google Cloud Vision OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
+    }
+  }
+
+  // Kết hợp nội dung text người dùng nhập và văn bản bóc tách từ Google Vision
+  let effectiveTextContent = textContent || '';
+  if (ocrExtractedText) {
+    effectiveTextContent = effectiveTextContent.trim()
+      ? `${effectiveTextContent.trim()}\n\n[Văn bản trích xuất nguyên vẹn qua Google Cloud Vision OCR]:\n${ocrExtractedText}`
+      : `[Văn bản trích xuất nguyên vẹn qua Google Cloud Vision OCR]:\n${ocrExtractedText}`;
+  }
+
   // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
   let analysisResult = null;
   let lastError = null;
@@ -125,7 +147,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
       console.log(`[Check] Attempting analysis with key: ${keyObj.label} (${keyObj.id})`);
       analysisResult = await analyzeContent({
         imageFiles: files,
-        textContent,
+        textContent: effectiveTextContent,
         platform,
         apiKey: keyObj.key,
         fewShotExamples,
@@ -274,6 +296,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     imageCount: files.length,
     hasText: Boolean(textContent),
     savedTemplateId,
+    ocrUsed,
+    ocrExtractedText: ocrExtractedText || null,
   });
 });
 
