@@ -1,11 +1,12 @@
 # CheckLuaDao - Backend
 
-Backend API cho ứng dụng kiểm tra tin nhắn lừa đảo, sử dụng Node.js + Express + Supabase + Google Gemini AI.
+Backend API cho ứng dụng kiểm tra tin nhắn lừa đảo, sử dụng Node.js + Express + Supabase, Tesseract.js OCR và Google Gemini phân tích văn bản.
 
 ## 📋 Yêu cầu hệ thống
 
 - Node.js >= 18.x
 - npm >= 9.x
+- Lần OCR đầu cần Internet để tải dữ liệu ngôn ngữ Việt/Anh; Tesseract.js cache dữ liệu cho các lần sau
 
 ## 🚀 Cài đặt và chạy
 
@@ -61,7 +62,7 @@ Server sẽ chạy tại: `http://localhost:5000`
 |--------|----------|-------|
 | `GET`  | `/api/health` | Health check |
 | `POST` | `/api/auth/login` | Đăng nhập admin |
-| `POST` | `/api/check` | Phân tích ảnh (multipart) |
+| `POST` | `/api/check` | OCR ảnh cục bộ rồi phân tích văn bản (multipart) |
 | `GET`  | `/api/templates` | Danh sách mẫu đã duyệt |
 | `GET`  | `/api/templates/:id` | Chi tiết mẫu đã duyệt |
 
@@ -84,6 +85,8 @@ Server sẽ chạy tại: `http://localhost:5000`
 Request: `multipart/form-data`
 - `images` - 1-5 file ảnh PNG/JPG
 - `platform` - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
+
+Ảnh chỉ được gửi tới backend của ứng dụng. Tesseract.js chạy OCR trên backend; chỉ văn bản OCR và văn bản người dùng nhập được gửi tới Gemini. Google Cloud Vision API không được sử dụng. OCR có thể đọc sai hoặc thiếu chữ ở ảnh mờ; nếu không có văn bản để phân tích, API trả về lỗi yêu cầu ảnh rõ hơn.
 
 ```bash
 curl -X POST http://localhost:5000/api/check \
@@ -154,7 +157,8 @@ backend/
 │   ├── templates.js        # GET /api/templates
 │   └── admin.js            # /api/admin/* (protected)
 └── services/
-    └── geminiService.js    # Gemini AI integration
+    ├── geminiService.js    # Gemini phân tích văn bản
+    └── ocrService.js       # Tesseract.js OCR cục bộ
 ```
 
 ---

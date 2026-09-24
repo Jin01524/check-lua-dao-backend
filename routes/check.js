@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
-import { extractTextWithGoogleVision } from '../services/visionOcrService.js';
+import { extractTextFromImages } from '../services/ocrService.js';
 import { recordScanInDB, sessionStats } from './stats.js';
 
 const router = express.Router();
@@ -15,10 +15,10 @@ const upload = multer({
     files: 5,
   },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (['image/jpeg', 'image/png'].includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'), false);
+      cb(new Error('Only JPEG and PNG images are allowed'), false);
     }
   },
 });
@@ -117,31 +117,26 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     console.warn('[Check] Could not fetch safe reference examples:', err.message);
   }
 
-  // ── Bước 1: Trích xuất văn bản độc quyền qua Google Cloud Vision OCR (KHÔNG DÙNG FALLBACK) ──
+  // OCR cục bộ: ảnh không được gửi tới Google Cloud Vision hoặc Gemini.
   let ocrExtractedText = '';
   let ocrUsed = false;
   if (files.length > 0) {
-    const primaryKey = shuffledKeys[0]?.key;
-    const ocrRes = await extractTextWithGoogleVision(files, primaryKey);
-    if (!ocrRes.success || !ocrRes.extractedText) {
-      const detail = ocrRes.error ? `: ${ocrRes.error}` : '';
-      console.error('[Check] Google Cloud Vision OCR thất bại và fallback đã bị tắt:', ocrRes.error);
-      return res.status(400).json({
-        error: `Google Cloud Vision OCR không trích xuất được văn bản${detail}. Cơ chế dự phòng (fallback) đã bị tắt theo yêu cầu hệ thống.`,
-      });
+    try {
+      ocrExtractedText = await extractTextFromImages(files);
+    } catch (error) {
+      console.error('[Check] Local OCR failed:', error);
+      return res.status(503).json({ error: 'Không thể đọc chữ trong ảnh. Vui lòng thử lại.' });
     }
-
-    ocrExtractedText = ocrRes.extractedText;
     ocrUsed = true;
-    console.log(`[Check] Google Cloud Vision OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
+    console.log(`[Check] Local OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
   }
 
-  // Kết hợp nội dung text người dùng nhập và văn bản bóc tách từ Google Vision
+  // Kết hợp văn bản người dùng nhập với kết quả OCR.
   let effectiveTextContent = textContent || '';
   if (ocrExtractedText) {
     effectiveTextContent = effectiveTextContent.trim()
-      ? `${effectiveTextContent.trim()}\n\n[Văn bản trích xuất nguyên vẹn qua Google Cloud Vision OCR]:\n${ocrExtractedText}`
-      : `[Văn bản trích xuất nguyên vẹn qua Google Cloud Vision OCR]:\n${ocrExtractedText}`;
+      ? `${effectiveTextContent.trim()}\n\n[Văn bản OCR từ ảnh]:\n${ocrExtractedText}`
+      : `[Văn bản OCR từ ảnh]:\n${ocrExtractedText}`;
   }
 
   if (!effectiveTextContent.trim()) {
@@ -149,7 +144,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   }
 
   // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
-  // ĐÃ TẮT FALLBACK: Không gửi file ảnh lên Gemini (imageFiles: []), 100% xử lý text-only từ Google Vision
+  // Chỉ văn bản được gửi tới Gemini.
   let analysisResult = null;
   let lastError = null;
 
@@ -157,8 +152,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     try {
       console.log(`[Check] Attempting analysis with key: ${keyObj.label} (${keyObj.id})`);
       analysisResult = await analyzeContent({
-        imageFiles: [], // KHÔNG gửi ảnh cho Gemini Vision
         textContent: effectiveTextContent,
+        imageCount: files.length,
         platform,
         apiKey: keyObj.key,
         fewShotExamples,
