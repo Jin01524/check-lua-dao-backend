@@ -157,56 +157,77 @@ Hãy kết hợp phân tích kỹ lưỡng đoạn văn bản/URL này cùng v�
 
   const hasImages = imageParts.length > 0;
 
-  // ── Build full prompt ──────────────────────────────────────────────────────
-  const prompt = `Bạn là chuyên gia giám định an ninh mạng và phân tích lừa đảo trực tuyến (Cyber Threat Intelligence Analyst) hàng đầu tại Việt Nam.
+  // ── Build full prompt (Kiến trúc Đa Tác Tử Phản Biện & Ma Trận Kênh Chiếm Đoạt) ──
+  const prompt = `Bạn là hệ thống AI Giám định An ninh mạng đa tác tử chuyên sâu (Cyber Threat Multi-Agent Deliberation System) tại Việt Nam.
 
-Thông tin đầu vào từ người dùng:
+Thông tin đầu vào:
 - Nền tảng ghi nhận: ${platform}
 - Số lượng ảnh chụp màn hình: ${imageParts.length}
 ${textInputSection}
 ${fewShotSection}
 ${safeExamplesSection}
 
-NHIỆM VỤ GIÁM ĐỊNH:
-1. Xác định tính hợp lệ của dữ liệu đầu vào:
-   - Nếu có ảnh, kiểm tra xem ảnh có phải là ảnh chụp màn hình tin nhắn / giao diện chat / thông báo / trang web hay không.
-   - Nếu hoàn toàn KHÔNG phải ảnh tin nhắn hoặc nội dung liên quan (ví dụ: ảnh động vật, phong cảnh, selfie, đồ gia dụng ngẫu nhiên), hãy đặt:
-     "isChatScreenshot": false, "isScam": false, "scamType": null, "title": null, "confidenceScore": 0, "messages": [], "warningPoints": [], "recommendations": [], "extractedUrls": [],
-     và "analysis": "Ảnh tải lên không hiển thị nội dung tin nhắn hoặc giao diện giao dịch cần kiểm tra. Vui lòng chụp lại màn hình rõ ràng hơn."
-2. Nếu là nội dung tin nhắn / giao dịch / văn bản liên quan:
-   - Đặt "isChatScreenshot": true.
-   - Bóc tách toàn bộ hội thoại theo trình tự thời gian hợp lý.
-     QUAN TRỌNG: Thay thế số điện thoại thực tế, số CCCD, số thẻ/tài khoản ngân hàng cụ thể bằng 'xxxx' để bảo vệ quyền riêng tư.
-   - Đánh giá mức độ rủi ro (confidenceScore từ 0 đến 100):
-     * 70 - 100: RỦI RO CỰC KỲ CAO / LỪA ĐẢO RÕ RÀNG (Giả mạo ngân hàng, dọa khóa tài khoản, link phishing, mạo danh cơ quan công an, tuyển dụng việc làm nạp tiền, v.v.)
-     * 40 - 69: NGHI VẤN / DẤU HIỆU BẤT THƯỜNG
-     * 0 - 39: AN TOÀN / KHÔNG PHÁT HIỆN DẤU HIỆU LỪA ĐẢO
-   - Liệt kê các dấu hiệu nhận biết cốt lõi (warningPoints) ngắn gọn, đanh thép (ví dụ: "Tên miền giả mạo .vip thay vì cổng chính thức", "Thao túng tâm lý khẩn cấp đe dọa khóa tài khoản trong 24h", "Yêu cầu cung cấp mã OTP bí mật").
-   - Đưa ra khuyến nghị an toàn tức thì (recommendations) cho nạn nhân.
-   - Trích xuất các tên miền, liên kết hoặc số điện thoại đáng ngờ (extractedUrls).
+======================================================================
+QUY TRÌNH TRANH LUẬN ĐA TÁC TỬ (MULTI-AGENT DELIBERATION PIPELINE):
+Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI logic chuyên biệt:
+
+1. TÁC TỬ 1 - THREAT HUNTER (Săn tìm rủi ro & thao túng tâm lý):
+   - Đóng vai trò Red Team / Hunter: Quét tìm các từ khóa rủi ro, yếu tố kích động tâm lý khẩn cấp, sợ hãi, lòng tham, giả mạo danh xưng ngân hàng/công an/nhà mạng.
+
+2. TÁC TỬ 2 - VERIFICATION AUDITOR (Phản biện độc lập & Kiểm định kênh chiếm đoạt):
+   - Đóng vai trò Devil's Advocate / Blue Team: Tìm kiếm các bằng chứng chứng minh tin nhắn có thể là hợp lệ, ngăn chặn BÁO ĐỘNG GIẢ (False Positive).
+   - KIỂM ĐỊNH MA TRẬN KÊNH CHIẾM ĐOẠT (EXFILTRATION VECTOR MATRIX):
+     Để một vụ lừa đảo trực tuyến chiếm đoạt tài sản xảy ra, kẻ gian BẮT BUỘC phải cung cấp Kênh Chiếm Đoạt từ xa (Exfiltration Vector). Chọn chính xác 1 trong các giá trị sau:
+     * "none": KHÔNG CÓ KÊNH CHIẾM ĐOẠT TỪ XA. (Ví dụ: Thông báo hướng dẫn khách hàng đến quầy giao dịch vật lý, nhắc nhở định kỳ không kèm link/yêu cầu tiền).
+     * "phishing_link": Chứa liên kết, website, tên miền lạ hoặc rút gọn để lừa đăng nhập/đánh cắp thông tin.
+     * "otp_theft": Yêu cầu cung cấp mã OTP, mã xác thực Smart OTP, mật khẩu, thông tin thẻ/tài khoản.
+     * "money_transfer": Yêu cầu chuyển tiền, nộp lệ phí, nộp tiền bảo lãnh vào tài khoản cá nhân.
+     * "apk_malware": Dụ dỗ cài đặt ứng dụng ngoài (file .apk), dịch vụ công giả mạo, quét mã QR cài mã độc.
+     * "unauthorized_contact": Yêu cầu gọi vào số hotline lạ hoặc kết bạn Zalo/Telegram cá nhân không chính thức.
+
+   - NGUYÊN TẮC VÀNG VỀ QUẦY GIAO DỊCH VẬT LÝ (PHYSICAL COUNTER AXIOM):
+     * Kẻ lừa đảo KHÔNG BAO GIỜ yêu cầu nạn nhân mang giấy tờ đến trực tiếp quầy giao dịch/phòng giao dịch ngân hàng hoặc trụ sở công an để làm việc mà KHÔNG kèm bất kỳ liên kết, số điện thoại lạ, đòi chuyển tiền hay OTP nào.
+     * Nếu tin nhắn chỉ mang tính chất thông báo: Yêu cầu khách hàng đến trực tiếp chi nhánh/phòng giao dịch ngân hàng (ví dụ: MB Bank, Vietcombank, Techcombank...) để tra soát giao dịch bất thường hoặc cập nhật sinh trắc học mà KHÔNG có link lạ, KHÔNG đòi OTP, KHÔNG đòi chuyển tiền -> ĐÂY LÀ NGHIỆP VỤ BÌNH THƯỜNG CỦA NGÂN HÀNG (AN TOÀN TUYỆT ĐỐI).
+     * BẮT BUỘC: Khi exfiltrationVector là "none" và nội dung hướng dẫn ra quầy vật lý, confidenceScore PHẢI nằm trong khoảng 0 - 15%, isScam = false! Tuyệt đối không được gán nhãn lừa đảo chỉ vì có từ khóa "Ngân hàng", "giao dịch bất thường" hay "tra soát".
+
+3. TÁC TỬ 3 - CONSENSUS ARBITER (Trọng tài tối cao & Phán quyết đồng thuận):
+   - Cân nhắc lập luận giữa Hunter và Auditor.
+   - Nếu Hunter cảnh báo từ khóa nhưng Auditor chứng minh không có kênh chiếm đoạt ("none") và hướng dẫn ra quầy vật lý -> Phán quyết: AN TOÀN (Gỡ cảnh báo sai lệch).
+   - Nếu có Kênh Chiếm Đoạt rõ ràng -> Phán quyết: LỪA ĐẢO / RỦI RO CAO.
+
+======================================================================
+QUY CHUẨN ĐẦU VÀO:
+- Nếu ảnh hoàn toàn KHÔNG phải ảnh tin nhắn/thông báo (ảnh phong cảnh, đồ vật, selfie...):
+  "isChatScreenshot": false, "isScam": false, "scamType": null, "title": null, "confidenceScore": 0, "exfiltrationVector": "none", "messages": [], "warningPoints": [], "recommendations": [], "extractedUrls": [],
+  "analysis": "Ảnh tải lên không hiển thị nội dung tin nhắn hoặc giao diện giao dịch cần kiểm tra. Vui lòng chụp lại màn hình rõ ràng hơn."
+- Nếu là tin nhắn/giao diện giao dịch/văn bản:
+  "isChatScreenshot": true.
+  Bóc tách hội thoại, thay thế số điện thoại thật, CCCD, STK bằng 'xxxx' để bảo mật.
 
 TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂN BẢN NÀO NGOÀI JSON:
 {
   "isChatScreenshot": true,
-  "isScam": true,
-  "scamType": "Tên loại hình lừa đảo (ví dụ: Giả mạo ngân hàng Vietcombank chiếm đoạt mã OTP)",
-  "title": "Tiêu đề ngắn gọn hồ sơ vụ việc",
-  "attackTarget": "Mục tiêu tấn công cụ thể của kẻ gian (ví dụ: Tài khoản ngân hàng & Mã OTP, Tiền chuyển khoản, Cướp SIM điện thoại, Quyền kiểm soát thiết bị Android, Thông tin danh tính cá nhân). Nếu không rõ hoặc không xác định được thì ghi là 'Không rõ'.",
-  "confidenceScore": 94,
-  "analysis": "Phân tích chi tiết thủ đoạn tấn công và cơ chế thao túng tâm lý, liệt kê từng ý ngắn gọn",
+  "isScam": false,
+  "scamType": "Tên loại lừa đảo nếu có, nếu an toàn thì ghi null",
+  "title": "Tiêu đề hồ sơ thẩm định",
+  "attackTarget": "Mục tiêu tấn công (hoặc 'Không có' nếu an toàn)",
+  "confidenceScore": 5,
+  "exfiltrationVector": "none",
+  "multiAgentDebate": {
+    "threatHunterAnalysis": "Nhận định ngắn gọn của Tác tử Săn tìm Rủi ro về từ khóa và ngữ cảnh",
+    "auditorDefense": "Lý lẽ phản biện của Tác tử Kiểm định về sự tồn tại của Kênh chiếm đoạt và tính hợp pháp",
+    "arbiterVerdict": "Phán quyết đồng thuận cuối cùng của Trọng tài AI giải thích rõ ràng tại sao an toàn hoặc lừa đảo"
+  },
+  "analysis": "Phân tích tổng hợp ngắn gọn, khách quan, súc tích",
   "warningPoints": [
-    "Dấu hiệu cảnh báo 1",
-    "Dấu hiệu cảnh báo 2"
+    "Dấu hiệu cảnh báo nếu có"
   ],
   "recommendations": [
-    "Khuyến nghị 1",
-    "Khuyến nghị 2"
+    "Khuyến nghị hành động thiết thực cho người dùng"
   ],
-  "extractedUrls": [
-    "vcb-digi-bank.vip"
-  ],
+  "extractedUrls": [],
   "messages": [
-    {"sender": "scammer", "text": "Nội dung tin nhắn đã khử nhạy cảm"}
+    {"sender": "Tên người gửi", "text": "Nội dung tin nhắn đã khử nhạy cảm"}
   ]
 }`;
 
@@ -260,6 +281,17 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
 
     const parsed = JSON.parse(cleaned);
 
+    const validVectors = ['none', 'phishing_link', 'otp_theft', 'money_transfer', 'apk_malware', 'unauthorized_contact'];
+    const exfiltrationVector = validVectors.includes(parsed.exfiltrationVector)
+      ? parsed.exfiltrationVector
+      : (parsed.isScam ? 'phishing_link' : 'none');
+
+    const multiAgentDebate = {
+      threatHunterAnalysis: parsed.multiAgentDebate?.threatHunterAnalysis || 'Đã phân tích các chỉ số rủi ro ngôn ngữ và tâm lý.',
+      auditorDefense: parsed.multiAgentDebate?.auditorDefense || 'Đã kiểm tra ma trận kênh chiếm đoạt dữ liệu và tài sản.',
+      arbiterVerdict: parsed.multiAgentDebate?.arbiterVerdict || 'Đạt đồng thuận phán quyết an toàn an ninh mạng.',
+    };
+
     return {
       isChatScreenshot: parsed.isChatScreenshot ?? true,
       isScam: Boolean(parsed.isScam),
@@ -267,6 +299,8 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       title: parsed.title || null,
       attackTarget: (parsed.attackTarget && String(parsed.attackTarget).trim()) || 'Không rõ',
       confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0,
+      exfiltrationVector,
+      multiAgentDebate,
       analysis: parsed.analysis || '',
       warningPoints: Array.isArray(parsed.warningPoints) ? parsed.warningPoints : [],
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],

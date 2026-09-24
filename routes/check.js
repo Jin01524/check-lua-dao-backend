@@ -189,6 +189,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         attack_target: analysisResult.attackTarget || 'Không rõ',
         confidence_score: numScore,
         warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
+        exfiltration_vector: analysisResult.exfiltrationVector || 'none',
+        multi_agent_debate: analysisResult.multiAgentDebate || null,
       };
 
       let { data: savedTemplate, error: saveError } = await supabase
@@ -229,6 +231,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         attack_target: 'Không có',
         confidence_score: numScore,
         warning_points: [],
+        exfiltration_vector: analysisResult.exfiltrationVector || 'none',
+        multi_agent_debate: analysisResult.multiAgentDebate || null,
       };
 
       try {
