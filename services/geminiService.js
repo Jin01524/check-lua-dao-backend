@@ -30,6 +30,7 @@ export const SUPPORTED_MODELS = [
 
 // Lưu model active trong bộ nhớ để phản hồi realtime 0ms cho toàn hệ thống
 let activeGeminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+const modelUnavailableUntil = new Map();
 
 export function getActiveGeminiModel() {
   return activeGeminiModel;
@@ -41,6 +42,7 @@ export function setActiveGeminiModel(modelId) {
     throw new Error(`Model "${modelId}" không hợp lệ. Chỉ hỗ trợ các model Flash từ 2.5 đến 3.5 (không dùng Lite).`);
   }
   activeGeminiModel = modelId;
+  modelUnavailableUntil.delete(modelId);
   console.log(`[GeminiService] Realtime active model switched to: ${activeGeminiModel}`);
   return activeGeminiModel;
 }
@@ -192,6 +194,7 @@ QUY CHUẨN ĐẦU VÀO:
 - Nếu là tin nhắn/giao diện giao dịch/văn bản:
   "isChatScreenshot": true.
   Bóc tách hội thoại, thay thế số điện thoại thật, CCCD, STK bằng 'xxxx' để bảo mật.
+  Không tạo phần đánh giá tổng hợp riêng; kết luận cuối cùng nằm trong "arbiterVerdict".
 
 TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂN BẢN NÀO NGOÀI JSON:
 {
@@ -207,7 +210,6 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
     "auditorDefense": "Lý lẽ phản biện của Tác tử Kiểm định về sự tồn tại của Kênh chiếm đoạt và tính hợp pháp",
     "arbiterVerdict": "Phán quyết đồng thuận cuối cùng của Trọng tài AI giải thích rõ ràng tại sao an toàn hoặc lừa đảo"
   },
-  "analysis": "Phân tích tổng hợp ngắn gọn, khách quan, súc tích",
   "warningPoints": [
     "Dấu hiệu cảnh báo nếu có"
   ],
@@ -222,25 +224,26 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
 
   // ── Call Gemini API (Flash models 2.5 - 3.5, ưu tiên activeGeminiModel và 3.5 Flash trước) ──
   const active = getActiveGeminiModel();
-  const candidateModels = [
-    active,
-    'gemini-3.5-flash',
-    'gemini-3.0-flash',
-    'gemini-2.5-flash',
-    'gemini-3.5-flash-preview',
-    'gemini-3.0-flash-preview',
-    'gemini-2.5-flash-preview',
-  ].filter(Boolean);
+  const candidateModels = [active, 'gemini-3.5-flash', 'gemini-2.5-flash'].filter(Boolean);
 
   const uniqueModels = [...new Set(candidateModels)];
+  const readyModels = uniqueModels.filter((model) => (modelUnavailableUntil.get(model) || 0) <= Date.now());
+  const modelsToTry = readyModels.length > 0 ? readyModels : uniqueModels;
+  const needsDeeperReasoning = textContent.length > 2500 || imageCount > 2;
 
   let lastModelError = null;
   let response = null;
 
-  for (const modelName of uniqueModels) {
+  for (const modelName of modelsToTry) {
     try {
       response = await ai.models.generateContent({
         model: modelName,
+        config: {
+          responseMimeType: 'application/json',
+          thinkingConfig: modelName.startsWith('gemini-2.5-')
+            ? { thinkingBudget: needsDeeperReasoning ? 2048 : 1024 }
+            : { thinkingLevel: needsDeeperReasoning ? 'medium' : 'low' },
+        },
         contents: [
           {
             role: 'user',
@@ -248,10 +251,17 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
           },
         ],
       });
-      if (response && response.text) break;
+      if (response && response.text) {
+        modelUnavailableUntil.delete(modelName);
+        break;
+      }
     } catch (err) {
       lastModelError = err;
       console.warn(`[GeminiService] Model ${modelName} failed, trying next:`, err.message);
+      if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(err.message)) throw err;
+      if (/"code":503|"status":"UNAVAILABLE"/i.test(err.message)) {
+        modelUnavailableUntil.set(modelName, Date.now() + 60_000);
+      }
     }
   }
 
@@ -290,7 +300,9 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0,
       exfiltrationVector,
       multiAgentDebate,
-      analysis: parsed.analysis || '',
+      analysis: parsed.isChatScreenshot === false
+        ? (parsed.analysis || 'Không tìm thấy nội dung tin nhắn cần kiểm tra. Vui lòng chụp lại màn hình rõ ràng hơn.')
+        : (parsed.multiAgentDebate?.arbiterVerdict || parsed.analysis || ''),
       warningPoints: Array.isArray(parsed.warningPoints) ? parsed.warningPoints : [],
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
       extractedUrls: Array.isArray(parsed.extractedUrls) ? parsed.extractedUrls : [],
