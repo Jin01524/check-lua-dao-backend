@@ -34,26 +34,29 @@ export async function getTemplateBaseMetrics(supabase) {
   }
 
   try {
-    const { data, count: exactCount, error } = await supabase
+    const query = supabase
       .from('scam_templates')
       .select('confidence_score', { count: 'exact' })
       .gte('confidence_score', 40)
-      .neq('scam_type', 'Tin nhắn an toàn / Bình thường');
+      .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+      .order('confidence_score', { ascending: false })
+      .limit(1);
+    const { data, count: exactCount, error } = await query;
 
     if (!error) {
       if (typeof exactCount === 'number') {
         count = exactCount;
-      } else if (Array.isArray(data)) {
-        count = data.length;
+      } else {
+        // Giữ cách tính cũ nếu máy chủ không trả exact count.
+        const fallback = await supabase.from('scam_templates')
+          .select('confidence_score')
+          .gte('confidence_score', 40)
+          .neq('scam_type', 'Tin nhắn an toàn / Bình thường');
+        if (!fallback.error && Array.isArray(fallback.data)) count = fallback.data.length;
       }
 
       if (Array.isArray(data) && data.length > 0) {
-        const scores = data
-          .map((t) => Number(t.confidence_score) || 0)
-          .filter((s) => s > 0);
-        if (scores.length > 0) {
-          maxConfidence = Math.max(...scores);
-        }
+        maxConfidence = Number(data[0].confidence_score) || 0;
       } else if (count === 0) {
         maxConfidence = 0;
       }
@@ -93,35 +96,38 @@ export async function recordScanInDB({ platform, isScam, confidenceScore, scamTy
     return;
   }
 
-  // 1. Ghi nhật ký chi tiết vào bảng scan_logs
-  try {
-    let { error: logErr } = await supabase.from('scan_logs').insert({
-      platform: platform || 'SMS',
-      is_scam: Boolean(isScam),
-      confidence_score: numConfidence,
-      scam_type: scamType || null,
-    });
-
-    if (logErr && (logErr.message?.includes('scam_type') || logErr.code === '42703')) {
-      await supabase.from('scan_logs').insert({
+  // Nhật ký độc lập với việc cập nhật số liệu tổng hợp.
+  const logPromise = (async () => {
+    try {
+      const { error: logErr } = await supabase.from('scan_logs').insert({
         platform: platform || 'SMS',
         is_scam: Boolean(isScam),
         confidence_score: numConfidence,
+        scam_type: scamType || null,
       });
+
+      if (logErr && (logErr.message?.includes('scam_type') || logErr.code === '42703')) {
+        await supabase.from('scan_logs').insert({
+          platform: platform || 'SMS',
+          is_scam: Boolean(isScam),
+          confidence_score: numConfidence,
+        });
+      }
+    } catch (err) {
+      console.warn('[Stats] Exception inserting into scan_logs:', err.message);
     }
-  } catch (err) {
-    console.warn('[Stats] Exception inserting into scan_logs:', err.message);
-  }
+  })();
 
-  // 2. Đọc số liệu hiện tại từ bảng system_stats trong Supabase và TĂNG LÊN BỀN VỮNG
+  // Hai phép đọc cũng độc lập; vẫn đợi đủ trước khi tính và ghi số liệu.
   try {
-    const { data: currentStats } = await supabase
-      .from('system_stats')
-      .select('total_scans, warned_scans, max_confidence')
-      .eq('id', 'global')
-      .maybeSingle();
-
-    const baseMetrics = await getTemplateBaseMetrics(supabase);
+    const [currentStatsResult, baseMetrics] = await Promise.all([
+      supabase.from('system_stats')
+        .select('total_scans, warned_scans, max_confidence')
+        .eq('id', 'global')
+        .maybeSingle(),
+      getTemplateBaseMetrics(supabase),
+    ]);
+    const currentStats = currentStatsResult.data;
 
     const prevTotal = Math.max(
       Number(currentStats?.total_scans) || 0,
@@ -173,6 +179,8 @@ export async function recordScanInDB({ platform, isScam, confidenceScore, scamTy
   } catch (err) {
     console.warn('[Stats] Exception updating system_stats in Supabase:', err.message);
   }
+
+  await logPromise;
 }
 
 /**

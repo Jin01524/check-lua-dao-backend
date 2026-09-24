@@ -33,6 +33,7 @@ const upload = multer({
  *   platform - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
  */
 router.post('/', upload.array('images', 5), async (req, res) => {
+  const startedAt = performance.now();
   const supabase = getSupabaseClient();
 
   const files = req.files || [];
@@ -46,10 +47,47 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     });
   }
 
-  // ── Lấy API key active từ Supabase ───────────────────────────────────────
-  const { data: dbKeys, error: dbError } = await supabase
-    .from('api_keys')
-    .select('id, key, label, is_active');
+  // OCR và các truy vấn độc lập chạy cùng lúc để giảm thời gian chờ.
+  const scamExamplesPromise = (async () => {
+    const same = await supabase.from('scam_templates')
+      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+      .gte('confidence_score', 40)
+      .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+      .ilike('platform', `%${platform}%`)
+      .limit(2);
+    if (!same.error && same.data?.length) return same.data;
+
+    const any = await supabase.from('scam_templates')
+      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+      .gte('confidence_score', 40)
+      .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+      .limit(2);
+    if (any.error) throw any.error;
+    return any.data || [];
+  })();
+
+  const [keyResult, scamResult, safeResult, ocrResult] = await Promise.allSettled([
+    supabase.from('api_keys').select('id, key, label, is_active'),
+    scamExamplesPromise,
+    supabase.from('scam_templates')
+      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
+      .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
+      .limit(2),
+    files.length > 0 ? extractTextFromImages(files) : Promise.resolve(''),
+  ]);
+
+  if (ocrResult.status === 'rejected') {
+    console.error('[Check] Local OCR failed:', ocrResult.reason);
+    return res.status(503).json({ error: 'Không thể đọc chữ trong ảnh. Vui lòng thử lại.' });
+  }
+
+  const ocrExtractedText = ocrResult.value;
+  const ocrUsed = files.length > 0;
+  if (ocrUsed) console.log(`[Check] Local OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
+
+  const { data: dbKeys, error: dbError } = keyResult.status === 'fulfilled'
+    ? keyResult.value
+    : { data: null, error: keyResult.reason };
 
   let activeKeys = [];
   if (!dbError && dbKeys && dbKeys.length > 0) {
@@ -77,59 +115,14 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   // Shuffle activeKeys để xoay tua ngẫu nhiên (Load Balancing)
   const shuffledKeys = [...activeKeys].sort(() => Math.random() - 0.5);
 
-  // ── Lấy 1-2 mẫu few-shot từ DB (ưu tiên cùng platform) ──────────────────
-  let fewShotExamples = [];
-  try {
-    const { data: samePlatformExamples } = await supabase
-      .from('scam_templates')
-      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
-      .gte('confidence_score', 40)
-      .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
-      .ilike('platform', `%${platform}%`)
-      .limit(2);
-
-    if (samePlatformExamples && samePlatformExamples.length > 0) {
-      fewShotExamples = samePlatformExamples;
-    } else {
-      const { data: anyExamples } = await supabase
-        .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
-        .gte('confidence_score', 40)
-        .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
-        .limit(2);
-      fewShotExamples = anyExamples || [];
-    }
-  } catch (err) {
-    console.error('[Check] Failed to fetch few-shot examples:', err.message);
+  const fewShotExamples = scamResult.status === 'fulfilled' ? scamResult.value : [];
+  if (scamResult.status === 'rejected') {
+    console.error('[Check] Failed to fetch few-shot examples:', scamResult.reason);
   }
 
-  // ── Lấy 1-2 mẫu an toàn từ DB để AI đối chiếu phân biệt ─────────────────
-  let safeExamples = [];
-  try {
-    const { data: safeDbExamples } = await supabase
-      .from('scam_templates')
-      .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
-      .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
-      .limit(2);
-
-    safeExamples = safeDbExamples || [];
-  } catch (err) {
-    console.warn('[Check] Could not fetch safe reference examples:', err.message);
-  }
-
-  // OCR cục bộ: ảnh không được gửi tới Google Cloud Vision hoặc Gemini.
-  let ocrExtractedText = '';
-  let ocrUsed = false;
-  if (files.length > 0) {
-    try {
-      ocrExtractedText = await extractTextFromImages(files);
-    } catch (error) {
-      console.error('[Check] Local OCR failed:', error);
-      return res.status(503).json({ error: 'Không thể đọc chữ trong ảnh. Vui lòng thử lại.' });
-    }
-    ocrUsed = true;
-    console.log(`[Check] Local OCR hoàn tất (${ocrExtractedText.length} ký tự)`);
-  }
+  const safeExamples = safeResult.status === 'fulfilled' && !safeResult.value.error
+    ? safeResult.value.data || []
+    : [];
 
   // Kết hợp văn bản người dùng nhập với kết quả OCR.
   let effectiveTextContent = textContent || '';
@@ -145,6 +138,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
 
   // ── Gọi Gemini để phân tích (xoay tua qua các API keys) ──────────────────
   // Chỉ văn bản được gửi tới Gemini.
+  const preparationFinishedAt = performance.now();
   let analysisResult = null;
   let lastError = null;
 
@@ -189,6 +183,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     const errorMsg = lastError ? lastError.message : 'Tất cả API key đều thất bại';
     return res.status(500).json({ error: `Phân tích thất bại: ${errorMsg}` });
   }
+  const analysisFinishedAt = performance.now();
 
   // ── Lưu trữ tin nhắn vào DB (Cả mẫu rủi ro và mẫu an toàn) ──────────────
   let savedTemplateId = null;
@@ -283,19 +278,19 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     }
   }
 
-  // ── Ghi nhận số liệu thống kê thực tế vào database Supabase ─────────────
+  // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
   try {
     await recordScanInDB({
       platform,
       isScam: Boolean(analysisResult.isScam),
-      confidenceScore: Number(analysisResult.confidenceScore) || 0,
+      confidenceScore: numScore,
       scamType: analysisResult.scamType || null,
     });
   } catch (statErr) {
     console.warn('[Check] Could not record scan stats:', statErr.message);
   }
-
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
+  console.log(`[Check] Timing: chuẩn bị/OCR ${Math.round(preparationFinishedAt - startedAt)}ms, AI ${Math.round(analysisFinishedAt - preparationFinishedAt)}ms, lưu ${Math.round(performance.now() - analysisFinishedAt)}ms`);
   res.json({
     ...analysisResult,
     platform,
