@@ -6,71 +6,8 @@ import { getSupabaseClient } from '../lib/supabase.js';
 const router = express.Router();
 
 /**
- * POST /api/auth/register
- * Đăng ký tài khoản người dùng thường
- */
-router.post('/register', async (req, res) => {
-  const supabase = getSupabaseClient();
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Tên đăng nhập và mật khẩu không được để trống' });
-  }
-
-  const cleanUsername = username.trim().toLowerCase();
-
-  // Không cho trùng với username admin
-  if (cleanUsername === (process.env.ADMIN_USERNAME || 'admin').toLowerCase()) {
-    return res.status(400).json({ error: 'Tên đăng nhập này đã được đăng ký hoặc không được phép dùng' });
-  }
-
-  // Kiểm tra xem username đã tồn tại chưa
-  const { data: existingUser } = await supabase
-    .from('users')
-    .select('id')
-    .eq('username', cleanUsername)
-    .maybeSingle();
-
-  if (existingUser) {
-    return res.status(400).json({ error: 'Tên đăng nhập đã tồn tại' });
-  }
-
-  // Hash password
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  // Lưu vào DB
-  const { data: newUser, error } = await supabase
-    .from('users')
-    .insert({
-      username: cleanUsername,
-      password_hash: passwordHash,
-      role: 'user',
-    })
-    .select('id, username, role, created_at')
-    .single();
-
-  if (error) {
-    console.error('[Register] DB insert error:', error.message);
-    return res.status(500).json({ error: 'Đăng ký tài khoản thất bại' });
-  }
-
-  // Generate User token
-  const token = jwt.sign(
-    { username: newUser.username, role: newUser.role, id: newUser.id },
-    process.env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
-
-  res.status(201).json({
-    message: 'Đăng ký tài khoản thành công',
-    token,
-    user: { username: newUser.username, role: newUser.role },
-  });
-});
-
-/**
  * POST /api/auth/login
- * Đăng nhập (Admin hoặc Người dùng thường)
+ * Đăng nhập Quản trị viên / Kiểm duyệt viên
  */
 router.post('/login', async (req, res) => {
   const supabase = getSupabaseClient();
