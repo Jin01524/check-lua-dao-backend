@@ -86,7 +86,7 @@ Request: `multipart/form-data`
 - `images` - 1-5 file ảnh PNG/JPG
 - `platform` - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
 
-Ảnh chỉ được gửi tới backend của ứng dụng. Tesseract.js chạy OCR trên backend; chỉ văn bản OCR và văn bản người dùng nhập được gửi tới Gemini. Google Cloud Vision API không được sử dụng. OCR có thể đọc sai hoặc thiếu chữ ở ảnh mờ; nếu không có văn bản để phân tích, API trả về lỗi yêu cầu ảnh rõ hơn.
+Ảnh chỉ được gửi tới backend của ứng dụng. Tesseract.js chạy OCR trên backend; chỉ văn bản OCR và văn bản người dùng nhập được gửi tới Gemini. OCR có thể đọc sai hoặc thiếu chữ ở ảnh mờ; nếu không có văn bản để phân tích, API trả về lỗi yêu cầu ảnh rõ hơn.
 
 ```bash
 curl -X POST http://localhost:5000/api/check \
