@@ -162,10 +162,10 @@ ${safeExamplesSection}
 QUY TRÌNH TRANH LUẬN ĐA TÁC TỬ (MULTI-AGENT DELIBERATION PIPELINE):
 Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI logic chuyên biệt:
 
-1. TÁC TỬ 1 - THREAT HUNTER (Săn tìm rủi ro & thao túng tâm lý):
+1. AI 1 - NHẬN ĐỊNH RỦI RO:
    - Đóng vai trò Red Team / Hunter: Quét tìm các từ khóa rủi ro, yếu tố kích động tâm lý khẩn cấp, sợ hãi, lòng tham, giả mạo danh xưng ngân hàng/công an/nhà mạng.
 
-2. TÁC TỬ 2 - VERIFICATION AUDITOR (Phản biện độc lập & Kiểm định kênh chiếm đoạt):
+2. AI 2- NHẬN ĐỊNH AN TOÀN:
    - Đóng vai trò Devil's Advocate / Blue Team: Tìm kiếm các bằng chứng chứng minh tin nhắn có thể là hợp lệ, ngăn chặn BÁO ĐỘNG GIẢ (False Positive).
    - KIỂM ĐỊNH MA TRẬN KÊNH CHIẾM ĐOẠT (EXFILTRATION VECTOR MATRIX):
      Để một vụ lừa đảo trực tuyến chiếm đoạt tài sản xảy ra, kẻ gian BẮT BUỘC phải cung cấp Kênh Chiếm Đoạt từ xa (Exfiltration Vector). Chọn chính xác 1 trong các giá trị sau:
@@ -181,7 +181,7 @@ Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI log
      * Nếu tin nhắn chỉ mang tính chất thông báo: Yêu cầu khách hàng đến trực tiếp chi nhánh/phòng giao dịch ngân hàng (ví dụ: MB Bank, Vietcombank, Techcombank...) để tra soát giao dịch bất thường hoặc cập nhật sinh trắc học mà KHÔNG có link lạ, KHÔNG đòi OTP, KHÔNG đòi chuyển tiền -> ĐÂY LÀ NGHIỆP VỤ BÌNH THƯỜNG CỦA NGÂN HÀNG (AN TOÀN TUYỆT ĐỐI).
      * BẮT BUỘC: Khi exfiltrationVector là "none" và nội dung hướng dẫn ra quầy vật lý, confidenceScore PHẢI nằm trong khoảng 0 - 15%, isScam = false! Tuyệt đối không được gán nhãn lừa đảo chỉ vì có từ khóa "Ngân hàng", "giao dịch bất thường" hay "tra soát".
 
-3. TÁC TỬ 3 - CONSENSUS ARBITER (Trọng tài tối cao & Phán quyết đồng thuận):
+3. AI 3 - KẾT LUẬN:
    - Cân nhắc lập luận giữa Hunter và Auditor.
    - Nếu Hunter cảnh báo từ khóa nhưng Auditor chứng minh không có kênh chiếm đoạt ("none") và hướng dẫn ra quầy vật lý -> Phán quyết: AN TOÀN (Gỡ cảnh báo sai lệch).
    - Nếu có Kênh Chiếm Đoạt rõ ràng -> Phán quyết: LỪA ĐẢO / RỦI RO CAO.
