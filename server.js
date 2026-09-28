@@ -2,51 +2,8 @@ import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 dotenv.config();
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// ─── Auto-generate bcrypt hash if needed ─────────────────────────────────────
-// Kiểm tra và generate bcrypt hash cho admin password (123456) khi startup
-const DEFAULT_ADMIN_PASSWORD = '123456';
-const BCRYPT_REGEX = /^\$2[ab]?\$\d{2}\$.{53}$/;
-
-const existingHash = process.env.ADMIN_PASSWORD_HASH || '';
-let hashIsValid = false;
-
-if (BCRYPT_REGEX.test(existingHash)) {
-  try {
-    hashIsValid = await bcrypt.compare(DEFAULT_ADMIN_PASSWORD, existingHash);
-  } catch (_) {
-    hashIsValid = false;
-  }
-}
-
-if (!hashIsValid) {
-  console.log('[Startup] Generating bcrypt hash for admin password (123456)...');
-  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
-  process.env.ADMIN_PASSWORD_HASH = hash;
-
-  // Ghi vào .env để lần sau không cần generate lại
-  try {
-    const envPath = path.join(__dirname, '.env');
-    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-    if (envContent.includes('ADMIN_PASSWORD_HASH=')) {
-      envContent = envContent.replace(/ADMIN_PASSWORD_HASH=.*/, `ADMIN_PASSWORD_HASH=${hash}`);
-    } else {
-      envContent += `\nADMIN_PASSWORD_HASH=${hash}\n`;
-    }
-    fs.writeFileSync(envPath, envContent, 'utf-8');
-    console.log('[Startup] ✅ bcrypt hash saved to .env');
-  } catch (e) {
-    console.warn('[Startup] Could not write hash to .env:', e.message);
-  }
-}
 
 import authRoutes from './routes/auth.js';
 import checkRoutes from './routes/check.js';
@@ -55,20 +12,10 @@ import adminRoutes from './routes/admin.js';
 import statsRoutes from './routes/stats.js';
 import { getSupabaseClient } from './lib/supabase.js';
 
-// Auto-seed admin user and curated templates in Supabase if connected
+// Seed curated examples only when explicitly requested. Never create accounts or passwords at startup.
 (async () => {
   try {
     const supabase = getSupabaseClient();
-    const adminHash = process.env.ADMIN_PASSWORD_HASH || await bcrypt.hash('123456', 10);
-    const { error: userErr } = await supabase
-      .from('users')
-      .upsert(
-        { username: 'admin', password_hash: adminHash, password_display: '123456', role: 'admin', is_active: true },
-        { onConflict: 'username' }
-      );
-    if (!userErr) {
-      console.log('[Startup] ✅ Admin user ensured in Supabase database (username: admin, role: admin)');
-    }
 
     // Chỉ seed curated templates nếu người dùng bật cấu hình SEED_TEMPLATES=true
     if (process.env.SEED_TEMPLATES === 'true') {
@@ -87,7 +34,7 @@ import { getSupabaseClient } from './lib/supabase.js';
               scam_type: tpl.scam_type,
               analysis: tpl.analysis,
               attack_target: tpl.attack_target || 'Không rõ',
-              confidence_score: tpl.confidence_score || 95,
+              confidence_score: tpl.confidence_score ?? null,
               warning_points: tpl.warning_points || [],
               messages_json: tpl.messages_json,
               is_approved: true,
@@ -98,34 +45,6 @@ import { getSupabaseClient } from './lib/supabase.js';
       }
     }
 
-    // Đảm bảo bảng system_stats trong Supabase đã có bản ghi thống kê ban đầu
-    try {
-      const { data: statsRow } = await supabase
-        .from('system_stats')
-        .select('*')
-        .eq('id', 'global')
-        .maybeSingle();
-
-      if (!statsRow) {
-        const { count: logCount } = await supabase.from('scan_logs').select('*', { count: 'exact', head: true });
-        const { count: tplCount } = await supabase.from('scam_templates').select('*', { count: 'exact', head: true });
-        const baseCount = (typeof tplCount === 'number' && tplCount > 0) ? tplCount : CURATED_TEMPLATES.length;
-        const initialCount = baseCount + (Number(logCount) || 0);
-
-        await supabase.from('system_stats').upsert({
-          id: 'global',
-          total_scans: initialCount,
-          warned_scans: initialCount,
-          max_confidence: 98,
-          updated_at: new Date().toISOString(),
-        });
-        console.log(`[Startup] ✅ system_stats initialized in Supabase with initial count = ${initialCount}`);
-      } else {
-        console.log(`[Startup] ✅ system_stats verified in Supabase: total_scans = ${statsRow.total_scans}`);
-      }
-    } catch (statsInitErr) {
-      console.warn('[Startup] Note: system_stats table not yet initialized in Supabase:', statsInitErr.message);
-    }
   } catch (e) {
     // Graceful silent skip if Supabase not yet configured locally
   }
@@ -180,7 +99,9 @@ app.use((err, _req, res, _next) => {
   console.error('[ERROR] Message:', err.message || err);
   console.error('[ERROR] Stack:', err.stack);
   const status = err.status || err.statusCode || 500;
-  res.status(status).json({ error: err.message || 'Internal server error' });
+  res.status(status).json({
+    error: status >= 500 ? 'Lỗi máy chủ. Vui lòng thử lại sau.' : (err.message || 'Yêu cầu không hợp lệ'),
+  });
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

@@ -240,15 +240,13 @@ function filterCurated(platform, search) {
   });
 }
 
-/**
- * Hàm tạo điểm rủi ro nhất quán từ 91% - 98% nếu thiếu dữ liệu trong DB
- */
+/** Preserve the recorded score; missing evidence must not become a fabricated percentage. */
 export function getConsistentScore(tpl) {
   if (tpl?.scam_type === 'Tin nhắn an toàn / Bình thường' || tpl?.is_safe) {
     if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
       return Math.round(Number(tpl.confidence_score));
     }
-    return 0;
+    return null;
   }
   if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
     const s = Number(tpl.confidence_score);
@@ -258,21 +256,43 @@ export function getConsistentScore(tpl) {
     const s = Number(tpl.danger_level);
     return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
   }
-  const str = String(tpl?.id || tpl?.title || 'template');
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
+  return null;
+}
+
+function redactPublicText(value) {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[đã ẩn email]')
+    .replace(/(?<!\d)\d{9,12}(?!\d)/g, '[đã ẩn số liên hệ]')
+    .replace(/((?:OTP|mã xác thực|mã xác minh)\D{0,16})\d{4,8}/gi, '$1[đã ẩn mã]');
+}
+
+function redactPublicValue(value) {
+  if (typeof value === 'string') return redactPublicText(value);
+  if (Array.isArray(value)) return value.map(redactPublicValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactPublicValue(item)]));
   }
-  return 91 + (Math.abs(hash) % 8); // 91% - 98%
+  return value;
+}
+
+/** Sanitize free-form public fields before sending either review state. */
+export function publicTemplate(tpl) {
+  const result = { ...tpl };
+  for (const field of ['title', 'analysis', 'attack_target', 'warning_points', 'messages_json']) {
+    if (field in result) result[field] = redactPublicValue(result[field]);
+  }
+  return result;
 }
 
 /**
  * GET /api/templates
- * Lấy danh sách mẫu đã được duyệt
+ * Lấy danh sách mẫu công khai, gồm cả mẫu chưa được kiểm duyệt.
  */
 router.get('/', async (req, res) => {
   const { platform, limit = 50, offset = 0, search } = req.query;
+  const pageSize = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 50));
+  const start = Math.max(0, Number.parseInt(offset, 10) || 0);
 
   let supabase = null;
   try {
@@ -284,21 +304,12 @@ router.get('/', async (req, res) => {
   // 1. Nếu có Supabase, thử truy vấn cơ sở dữ liệu
   if (supabase) {
     try {
-      // Kho mẫu lừa đảo: chỉ hiển thị các mẫu đạt mức rủi ro (confidence_score >= 40 và không phải mẫu an toàn)
       let query = supabase
         .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, is_approved, created_at')
-        .gte('confidence_score', 40)
-        .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, is_approved, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .range(Number(offset), Number(offset) + Number(limit) - 1);
-
-      // Cho phép lọc theo approved nếu query có truyền vào (mặc định lấy tất cả các mẫu đạt rủi ro)
-      if (req.query.approved === 'true') {
-        query = query.eq('is_approved', true);
-      } else if (req.query.approved === 'false') {
-        query = query.eq('is_approved', false);
-      }
+        .order('id', { ascending: false })
+        .range(start, start + pageSize - 1);
 
       if (platform && platform.toUpperCase() !== 'ALL') {
         query = query.ilike('platform', `%${platform}%`);
@@ -309,23 +320,17 @@ router.get('/', async (req, res) => {
         query = query.or(`title.ilike.%${term}%,scam_type.ilike.%${term}%,analysis.ilike.%${term}%`);
       }
 
-      let { data, error } = await query;
+      let { data, error, count: total } = await query;
 
       // Fallback truy vấn cơ bản nếu thiếu cột mới (confidence_score / warning_points / attack_target)
       if (error) {
         console.warn('[Templates] Advanced query failed, falling back to basic columns:', error.message);
         let basicQuery = supabase
           .from('scam_templates')
-          .select('id, title, platform, scam_type, analysis, is_approved, created_at')
-          .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+          .select('id, title, platform, scam_type, analysis, is_approved, created_at', { count: 'exact' })
           .order('created_at', { ascending: false })
-          .range(Number(offset), Number(offset) + Number(limit) - 1);
-
-        if (req.query.approved === 'true') {
-          basicQuery = basicQuery.eq('is_approved', true);
-        } else if (req.query.approved === 'false') {
-          basicQuery = basicQuery.eq('is_approved', false);
-        }
+          .order('id', { ascending: false })
+          .range(start, start + pageSize - 1);
 
         if (platform && platform.toUpperCase() !== 'ALL') {
           basicQuery = basicQuery.ilike('platform', `%${platform}%`);
@@ -339,33 +344,26 @@ router.get('/', async (req, res) => {
         const fallbackRes = await basicQuery;
         if (!fallbackRes.error && fallbackRes.data) {
           data = fallbackRes.data;
+          total = fallbackRes.count;
           error = null;
         }
       }
 
-      // Nếu có dữ liệu trong database, chuẩn hóa và loại bỏ các mẫu tin nhắn an toàn
+      // Giữ nguyên mọi trạng thái kiểm duyệt và tổng số bản ghi để phân trang đúng.
       if (!error && data && data.length > 0) {
-        const riskOnlyData = data.filter((item) => {
-          const score = Number(item.confidence_score);
-          const isSafeType = String(item.scam_type || '').includes('Tin nhắn an toàn');
-          if (isSafeType) return false;
-          if (!isNaN(score) && score > 0 && score < 40) return false;
-          return true;
-        });
-
-        const enriched = riskOnlyData.map(item => ({
+        const enriched = data.map(item => ({
           ...item,
           attack_target: item.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(item),
-          warning_points: item.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+          warning_points: item.warning_points || [],
           is_approved: Boolean(item.is_approved),
         }));
-        return res.json({ data: enriched, count: enriched.length });
+        return res.json({ data: enriched.map(publicTemplate), count: enriched.length, total, hasMore: start + enriched.length < (total ?? 0) });
       }
 
       // Nếu database đã kết nối và bảng scam_templates rỗng (người dùng đã clear)
       if (!error && Array.isArray(data) && data.length === 0) {
-        return res.json({ data: [], count: 0 });
+        return res.json({ data: [], count: 0, total: total ?? 0, hasMore: false });
       }
     } catch (err) {
       console.warn('[Templates] Error reading from DB:', err.message);
@@ -373,19 +371,22 @@ router.get('/', async (req, res) => {
   }
 
   // 2. Fallback: Trả về Curated Threat Library
-  const curated = filterCurated(platform, search).map(item => ({
+  const matches = filterCurated(platform, search);
+  const curated = matches.slice(start, start + pageSize).map(item => ({
     ...item,
     confidence_score: getConsistentScore(item),
   }));
   return res.json({
-    data: curated,
+    data: curated.map(publicTemplate),
     count: curated.length,
+    total: matches.length,
+    hasMore: start + curated.length < matches.length,
   });
 });
 
 /**
  * GET /api/templates/:id
- * Lấy chi tiết 1 mẫu đã duyệt
+ * Lấy chi tiết 1 mẫu công khai, gồm cả mẫu chưa được kiểm duyệt.
  */
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
@@ -400,21 +401,31 @@ router.get('/:id', async (req, res) => {
   // 1. Thử lấy từ Supabase
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('scam_templates')
-        .select('*')
+        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, messages_json, is_approved, created_at')
         .eq('id', id)
         .maybeSingle();
+
+      if (error) {
+        const fallback = await supabase
+          .from('scam_templates')
+          .select('id, title, platform, scam_type, analysis, messages_json, is_approved, created_at')
+          .eq('id', id)
+          .maybeSingle();
+        data = fallback.data;
+        error = fallback.error;
+      }
 
       if (!error && data) {
         const enriched = {
           ...data,
           attack_target: data.attack_target || 'Không rõ',
           confidence_score: getConsistentScore(data),
-          warning_points: data.warning_points || ['Thao túng tâm lý khẩn cấp', 'Yêu cầu chuyển tiền/cung cấp OTP'],
+          warning_points: data.warning_points || [],
           is_approved: Boolean(data.is_approved),
         };
-        return res.json({ data: enriched });
+        return res.json({ data: publicTemplate(enriched) });
       }
     } catch (err) {
       console.warn('[Templates] Error fetching id from DB:', err.message);
@@ -428,10 +439,10 @@ router.get('/:id', async (req, res) => {
 
   if (found) {
     return res.json({
-      data: {
+      data: publicTemplate({
         ...found,
         confidence_score: getConsistentScore(found),
-      }
+      })
     });
   }
 
@@ -439,4 +450,3 @@ router.get('/:id', async (req, res) => {
 });
 
 export default router;
-

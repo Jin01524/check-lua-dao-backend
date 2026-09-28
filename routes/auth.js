@@ -10,7 +10,6 @@ const router = express.Router();
  * Đăng nhập Quản trị viên / Kiểm duyệt viên
  */
 router.post('/login', async (req, res) => {
-  const supabase = getSupabaseClient();
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -18,17 +17,15 @@ router.post('/login', async (req, res) => {
   }
 
   const cleanUsername = username.trim().toLowerCase();
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    return res.status(503).json({ error: 'Hệ thống đăng nhập chưa được cấu hình' });
+  }
 
   // 1. Kiểm tra xem có phải Admin không
-  if (cleanUsername === (process.env.ADMIN_USERNAME || 'admin').toLowerCase()) {
+  if (process.env.ADMIN_USERNAME && cleanUsername === process.env.ADMIN_USERNAME.toLowerCase()) {
     const passwordHash = process.env.ADMIN_PASSWORD_HASH;
-    let isMatch = false;
-
-    if (password === '123456') {
-      isMatch = true;
-    } else if (passwordHash) {
-      isMatch = await bcrypt.compare(password, passwordHash);
-    }
+    const isMatch = passwordHash ? await bcrypt.compare(password, passwordHash) : false;
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
@@ -37,7 +34,7 @@ router.post('/login', async (req, res) => {
     // Tạo token Admin
     const token = jwt.sign(
       { username: cleanUsername, role: 'admin' },
-      process.env.JWT_SECRET || 'checkluadao_jwt_secret_2024',
+      jwtSecret,
       { expiresIn: '24h' }
     );
 
@@ -49,9 +46,9 @@ router.post('/login', async (req, res) => {
   }
 
   // 2. Kiểm tra tài khoản trong bảng users (hỗ trợ cả admin và user thường)
-  const { data: user, error } = await supabase
+  const { data: user, error } = await getSupabaseClient()
     .from('users')
-    .select('*')
+    .select('id, username, password_hash, role, is_active')
     .eq('username', cleanUsername)
     .maybeSingle();
 
@@ -64,12 +61,16 @@ router.post('/login', async (req, res) => {
     return res.status(403).json({ error: 'Tài khoản này đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.' });
   }
 
+  if (!user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+    return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
+  }
+
   const assignedRole = ['admin', 'moderator', 'user'].includes(user.role) ? user.role : 'user';
 
   // Tạo token
   const token = jwt.sign(
     { username: user.username, role: assignedRole, id: user.id },
-    process.env.JWT_SECRET || 'checkluadao_jwt_secret_2024',
+    jwtSecret,
     { expiresIn: '24h' }
   );
 

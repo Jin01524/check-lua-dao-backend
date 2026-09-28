@@ -13,6 +13,10 @@ const authMiddleware = (req, res, next) => {
 
   const token = authHeader.split(' ')[1];
 
+  if (!process.env.JWT_SECRET) {
+    return res.status(503).json({ error: 'Hệ thống xác thực chưa được cấu hình' });
+  }
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;

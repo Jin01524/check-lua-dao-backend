@@ -53,6 +53,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
       .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
       .gte('confidence_score', 40)
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+      .eq('is_approved', true)
       .ilike('platform', `%${platform}%`)
       .limit(2);
     if (!same.error && same.data?.length) return same.data;
@@ -61,6 +62,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
       .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
       .gte('confidence_score', 40)
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
+      .eq('is_approved', true)
       .limit(2);
     if (any.error) throw any.error;
     return any.data || [];
@@ -72,6 +74,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     supabase.from('scam_templates')
       .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
       .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
+      .eq('is_approved', true)
       .limit(2),
     files.length > 0 ? extractTextFromImages(files) : Promise.resolve(''),
   ]);
@@ -180,8 +183,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   }
 
   if (!analysisResult) {
-    const errorMsg = lastError ? lastError.message : 'Tất cả API key đều thất bại';
-    return res.status(500).json({ error: `Phân tích thất bại: ${errorMsg}` });
+    if (lastError) console.error('[Check] Analysis provider failed:', lastError);
+    return res.status(500).json({ error: 'Phân tích thất bại. Vui lòng thử lại sau.' });
   }
   const analysisFinishedAt = performance.now();
 
@@ -191,7 +194,9 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   const hasRisk = Boolean(analysisResult.isScam) || numScore >= 40;
   const hasContent = Boolean(analysisResult.isChatScreenshot) || Boolean(textContent) || files.length > 0;
 
-  if (hasContent) {
+  // Do not retain raw user messages by default. Explicitly opt in only after
+  // the product has a documented consent, redaction and deletion policy.
+  if (hasContent && process.env.STORE_SCAN_TEMPLATES === 'true') {
     const messagesToSave = Array.isArray(analysisResult.messages) && analysisResult.messages.length > 0
       ? analysisResult.messages
       : (textContent ? [{ sender: 'user', text: textContent }] : []);
@@ -239,14 +244,14 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         console.log(`[Check] Scam template saved with id: ${savedTemplateId} (chưa được kiểm định)`);
       }
     } else {
-      // 2. Tin nhắn KHÔNG rủi ro: Lưu trữ lại để AI đối chiếu & đánh giá (KHÔNG hiện lên kho mẫu)
+      // 2. Tin nhắn không rủi ro vẫn cần kiểm duyệt trước mọi lần sử dụng lại.
       const safeTemplate = {
         title: analysisResult.title || 'Tin nhắn an toàn / Bình thường',
         platform,
         scam_type: 'Tin nhắn an toàn / Bình thường',
         analysis: analysisResult.analysis || 'Tin nhắn hợp lệ, không có dấu hiệu thao túng hay lừa đảo.',
         messages_json: messagesToSave,
-        is_approved: true,
+        is_approved: false,
       };
 
       let insertSafeData = {
@@ -271,7 +276,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         if (savedSafe?.id) {
           savedTemplateId = savedSafe.id;
         }
-        console.log(`[Check] Stored non-risk message for AI reference benchmark (score: ${numScore}%)`);
+        console.log(`[Check] Stored non-risk message pending review (score: ${numScore}%)`);
       } catch (safeErr) {
         console.warn('[Check] Could not save safe reference message:', safeErr.message);
       }

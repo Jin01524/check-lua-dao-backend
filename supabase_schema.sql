@@ -20,30 +20,36 @@ CREATE TABLE IF NOT EXISTS scam_templates (
   scam_type TEXT,
   analysis TEXT,
   attack_target TEXT DEFAULT 'Không rõ',
-  confidence_score INTEGER DEFAULT 90,
+  confidence_score INTEGER,
   warning_points JSONB DEFAULT '[]',
+  exfiltration_vector TEXT DEFAULT 'none',
+  multi_agent_debate JSONB,
   messages_json JSONB NOT NULL DEFAULT '[]',
   is_approved BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Migration nếu bảng đã tồn tại từ trước
-ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 90;
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS confidence_score INTEGER;
+ALTER TABLE scam_templates ALTER COLUMN confidence_score DROP DEFAULT;
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS warning_points JSONB DEFAULT '[]';
 ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS attack_target TEXT DEFAULT 'Không rõ';
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_display TEXT DEFAULT '123456';
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS exfiltration_vector TEXT DEFAULT 'none';
+ALTER TABLE scam_templates ADD COLUMN IF NOT EXISTS multi_agent_debate JSONB;
 
 -- Bảng lưu tài khoản người dùng
 CREATE TABLE IF NOT EXISTS users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  password_display TEXT DEFAULT '123456',
   role TEXT DEFAULT 'user',
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+-- Existing deployments may have stored readable passwords. Remove that column.
+ALTER TABLE users DROP COLUMN IF EXISTS password_display;
 
 -- Bảng lưu nhật ký quét tin nhắn thực tế
 CREATE TABLE IF NOT EXISTS scan_logs (
@@ -58,11 +64,13 @@ CREATE TABLE IF NOT EXISTS scan_logs (
 -- Bảng lưu số liệu thống kê hệ thống (đồng bộ trong database Supabase)
 CREATE TABLE IF NOT EXISTS system_stats (
   id TEXT PRIMARY KEY DEFAULT 'global',
-  total_scans INTEGER DEFAULT 16,
-  warned_scans INTEGER DEFAULT 16,
-  max_confidence INTEGER DEFAULT 98,
+  total_scans INTEGER DEFAULT 0,
+  warned_scans INTEGER DEFAULT 0,
+  max_confidence INTEGER DEFAULT 0,
+  active_model TEXT,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE system_stats ADD COLUMN IF NOT EXISTS active_model TEXT;
 
 -- Index để query nhanh hơn
 CREATE INDEX IF NOT EXISTS idx_scam_templates_is_approved ON scam_templates(is_approved);
@@ -71,39 +79,17 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_is_active ON api_keys(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_scan_logs_created_at ON scan_logs(created_at);
 
--- Tắt RLS để service role key có thể truy cập toàn bộ không bị chặn
-ALTER TABLE api_keys DISABLE ROW LEVEL SECURITY;
-ALTER TABLE scam_templates DISABLE ROW LEVEL SECURITY;
-ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE scan_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE system_stats DISABLE ROW LEVEL SECURITY;
+-- Chỉ backend dùng service-role key; service_role vượt RLS. Chặn truy cập trực tiếp
+-- bằng anon/authenticated, kể cả khi các bảng đã tồn tại từ bản triển khai cũ.
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scam_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scan_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE system_stats ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON api_keys, scam_templates, users, scan_logs, system_stats FROM anon, authenticated;
 
--- Khởi tạo số liệu mặc định cho system_stats nếu chưa có (16 tin nhắn mẫu cơ sở)
+-- Khởi tạo thống kê mới từ 0; không biến mẫu tham khảo thành lượt quét thật.
 INSERT INTO system_stats (id, total_scans, warned_scans, max_confidence)
-VALUES ('global', 16, 16, 98)
-ON CONFLICT (id) DO UPDATE
-SET total_scans = GREATEST(system_stats.total_scans, 16),
-    warned_scans = GREATEST(system_stats.warned_scans, 16);
-
--- Thêm API Key Gemini mặc định nếu chưa có
-INSERT INTO api_keys (key, label, is_active)
-SELECT 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ', 'Gemini Key Mặc định', true
-WHERE NOT EXISTS (SELECT 1 FROM api_keys WHERE key = 'AIzaSyD5GFjBWabnb9yoYt3samA8mZojkJNW4rQ');
-
--- Thêm tài khoản Admin mặc định (username: admin, mật khẩu: 123456)
--- Hash bcrypt của 123456: $2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm
-INSERT INTO users (username, password_hash, password_display, role, is_active)
-VALUES ('admin', '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', '123456', 'admin', true)
-ON CONFLICT (username)
-DO UPDATE SET password_hash = '$2b$10$PkGUEDWv7ZgTPYNVmJNdfuUq/4Rp0NdwrBfrw5xIxKN8MUcSKYTGm', password_display = '123456', role = 'admin', is_active = true;
-
--- Cập nhật điểm rủi ro và mục tiêu tấn công chuẩn cho các mẫu cũ
-UPDATE scam_templates SET confidence_score = 98, attack_target = 'Tài khoản ngân hàng & Mã OTP' WHERE title ILIKE '%Vietcombank%';
-UPDATE scam_templates SET confidence_score = 96, attack_target = 'Tiền tiết kiệm / Tài khoản tạm giữ' WHERE title ILIKE '%Công an%';
-UPDATE scam_templates SET confidence_score = 94, attack_target = 'Tiền nạp nhiệm vụ & Giật đơn' WHERE title ILIKE '%Cộng tác viên%' OR title ILIKE '%Shopee%';
-UPDATE scam_templates SET confidence_score = 97, attack_target = 'Quyền kiểm soát điện thoại (Trợ năng)' WHERE title ILIKE '%Thuế%' OR title ILIKE '%Trojan%';
-UPDATE scam_templates SET confidence_score = 93, attack_target = 'Quyền kiểm soát SIM & Mã OTP SMS' WHERE title ILIKE '%khóa thuê bao%' OR title ILIKE '%SIM%';
-UPDATE scam_templates SET confidence_score = 92, attack_target = 'Tiền phí hồ sơ / Phí trước bạ' WHERE title ILIKE '%trúng thưởng%' OR title ILIKE '%Honda SH%';
-
-
+VALUES ('global', 0, 0, 0)
+ON CONFLICT (id) DO NOTHING;
 

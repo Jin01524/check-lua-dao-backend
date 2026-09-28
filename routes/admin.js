@@ -15,6 +15,19 @@ const router = express.Router();
 // Áp dụng auth middleware cho tất cả routes trong /api/admin
 router.use(authMiddleware);
 
+const requireRole = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user?.role)) {
+    return res.status(403).json({ error: 'Không có quyền truy cập chức năng này' });
+  }
+  next();
+};
+
+router.use('/active-model', requireRole('admin'));
+router.use('/api-keys', requireRole('admin'));
+router.use('/templates', requireRole('admin', 'moderator'));
+router.use('/users', requireRole('admin'));
+router.use('/clear-data', requireRole('admin'));
+
 // ══════════════════════════════════════════════════════════════════════════════
 // GEMINI MODEL REALTIME MANAGEMENT
 // ══════════════════════════════════════════════════════════════════════════════
@@ -415,22 +428,10 @@ router.get('/users', async (req, res) => {
     return res.status(500).json({ error: 'Database chưa sẵn sàng' });
   }
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('users')
-    .select('id, username, role, is_active, password_display, created_at')
+    .select('id, username, role, is_active, created_at')
     .order('created_at', { ascending: false });
-
-  // Fallback nếu DB chưa có cột is_active hoặc password_display
-  if (error) {
-    const fallback = await supabase
-      .from('users')
-      .select('id, username, role, created_at')
-      .order('created_at', { ascending: false });
-    if (!fallback.error && fallback.data) {
-      data = fallback.data.map(u => ({ ...u, is_active: true, password_display: '123456' }));
-      error = null;
-    }
-  }
 
   if (error) {
     return res.status(500).json({ error: 'Không thể lấy danh sách tài khoản: ' + error.message });
@@ -439,18 +440,17 @@ router.get('/users', async (req, res) => {
   const list = (data || []).map(u => ({
     ...u,
     is_active: u.is_active !== false,
-    password_display: u.password_display || (u.username?.toLowerCase() === 'admin' ? '123456' : '••••••'),
   }));
 
-  // Đảm bảo luôn có tài khoản admin master
-  if (!list.some((u) => u.username.toLowerCase() === 'admin')) {
+  // The admin configured through environment variables is not a database row.
+  const envAdmin = process.env.ADMIN_USERNAME?.toLowerCase();
+  if (envAdmin && !list.some((u) => u.username.toLowerCase() === envAdmin)) {
     list.unshift({
       id: 'master-admin',
-      username: 'admin',
+      username: envAdmin,
       role: 'admin',
       is_active: true,
-      password_display: '123456',
-      created_at: new Date().toISOString(),
+      created_at: null,
     });
   }
 
@@ -473,8 +473,8 @@ router.post('/users', async (req, res) => {
     return res.status(400).json({ error: 'Tên đăng nhập không được để trống' });
   }
 
-  if (!password || password.length < 6) {
-    return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự' });
+  if (!password || password.length < 12) {
+    return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 12 ký tự' });
   }
 
   const cleanUsername = username.trim().toLowerCase();
@@ -500,34 +500,18 @@ router.post('/users', async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, 10);
 
-  let insertObj = {
+  const insertObj = {
     username: cleanUsername,
     password_hash: passwordHash,
-    password_display: password,
     role: validRole,
     is_active: true,
   };
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('users')
     .insert(insertObj)
-    .select('id, username, role, is_active, password_display, created_at')
+    .select('id, username, role, is_active, created_at')
     .single();
-
-  // Fallback nếu DB chưa có cột is_active hoặc password_display
-  if (error) {
-    delete insertObj.is_active;
-    delete insertObj.password_display;
-    const fallback = await supabase
-      .from('users')
-      .insert(insertObj)
-      .select('id, username, role, created_at')
-      .single();
-    if (!fallback.error) {
-      data = { ...fallback.data, is_active: true, password_display: password };
-      error = null;
-    }
-  }
 
   if (error) {
     return res.status(500).json({ error: 'Không thể tạo tài khoản: ' + error.message });
@@ -535,7 +519,7 @@ router.post('/users', async (req, res) => {
 
   res.status(201).json({
     message: `Đã tạo tài khoản ${validRole === 'moderator' ? 'Kiểm duyệt viên' : 'Quản trị viên'} thành công`,
-    data: { ...data, is_active: true, password_display: password },
+    data,
   });
 });
 
@@ -568,7 +552,7 @@ router.patch('/users/:id', async (req, res) => {
     return res.status(404).json({ error: 'Không tìm thấy tài khoản' });
   }
 
-  const isMasterAdmin = targetUser.username.toLowerCase() === 'admin';
+  const isMasterAdmin = targetUser.username.toLowerCase() === (process.env.ADMIN_USERNAME || 'admin').toLowerCase();
   const updateFields = {};
 
   // 1. Đổi tên tài khoản
@@ -592,11 +576,10 @@ router.patch('/users/:id', async (req, res) => {
 
   // 2. Đổi mật khẩu
   if (password) {
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+    if (password.length < 12) {
+      return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 12 ký tự' });
     }
     updateFields.password_hash = await bcrypt.hash(password, 10);
-    updateFields.password_display = password;
   }
 
   // 3. Khóa / Mở khóa tài khoản
@@ -619,41 +602,12 @@ router.patch('/users/:id', async (req, res) => {
     return res.status(400).json({ error: 'Không có thông tin thay đổi hợp lệ' });
   }
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('users')
     .update(updateFields)
     .eq('id', id)
-    .select('id, username, role, is_active, password_display, created_at')
+    .select('id, username, role, is_active, created_at')
     .single();
-
-  // Fallback nếu lỗi do chưa có cột is_active hoặc password_display
-  if (error && (updateFields.is_active !== undefined || updateFields.password_display !== undefined)) {
-    const desiredActive = updateFields.is_active;
-    const desiredPass = updateFields.password_display;
-    delete updateFields.is_active;
-    delete updateFields.password_display;
-    if (Object.keys(updateFields).length > 0) {
-      const fallback = await supabase
-        .from('users')
-        .update(updateFields)
-        .eq('id', id)
-        .select('id, username, role, created_at')
-        .single();
-      data = fallback.data ? {
-        ...fallback.data,
-        is_active: desiredActive !== undefined ? desiredActive : true,
-        password_display: desiredPass || targetUser.password_display || '••••••'
-      } : null;
-      error = fallback.error;
-    } else {
-      error = null;
-      data = {
-        ...targetUser,
-        is_active: desiredActive !== undefined ? desiredActive : true,
-        password_display: desiredPass || targetUser.password_display || '••••••'
-      };
-    }
-  }
 
   if (error) {
     return res.status(500).json({ error: 'Cập nhật tài khoản thất bại: ' + error.message });
@@ -664,7 +618,6 @@ router.patch('/users/:id', async (req, res) => {
     data: {
       ...data,
       is_active: data?.is_active !== false,
-      password_display: data?.password_display || (data?.username?.toLowerCase() === 'admin' ? '123456' : '••••••'),
     },
   });
 });

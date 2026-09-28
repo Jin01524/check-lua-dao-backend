@@ -14,15 +14,19 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const ADMIN_PASSWORD = '123456';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const ENV_FILE = path.join(__dirname, '.env');
+
+if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
+  throw new Error('Set ADMIN_PASSWORD (at least 12 characters) in the environment before running setup.');
+}
 
 console.log('🔑 Generating bcrypt hash for admin password...');
 const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
 console.log('✅ Hash generated:', hash);
 
 // Đọc file .env hiện tại
-let envContent = fs.readFileSync(ENV_FILE, 'utf-8');
+let envContent = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf-8') : '';
 
 // Thay thế dòng ADMIN_PASSWORD_HASH
 if (envContent.includes('ADMIN_PASSWORD_HASH=')) {
@@ -36,7 +40,4 @@ if (envContent.includes('ADMIN_PASSWORD_HASH=')) {
 
 fs.writeFileSync(ENV_FILE, envContent, 'utf-8');
 console.log('✅ .env updated with new password hash');
-console.log('\n📋 Admin credentials:');
-console.log('   Username:', 'admin');
-console.log('   Password:', ADMIN_PASSWORD);
-console.log('\n🚀 Now run: npm run dev');
+console.log('Admin password hash configured. Keep the plaintext password outside the repository.');

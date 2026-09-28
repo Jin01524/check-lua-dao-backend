@@ -10,6 +10,8 @@ Backend API cho ứng dụng kiểm tra tin nhắn lừa đảo, sử dụng Nod
 
 ## 🚀 Cài đặt và chạy
 
+Supabase CLI được khóa phiên bản trong dev dependencies. Từ thư mục backend, chạy `npm ci` rồi dùng `npx --no-install supabase --version` để kiểm tra. Các lệnh trong `../supabase.txt` cần thêm tiền tố `npx --no-install`, ví dụ `npx --no-install supabase login` và `npx --no-install supabase link --project-ref <project-ref>`. Chỉ chạy `link` sau khi đăng nhập đúng tài khoản; không đưa mật khẩu database hoặc access token vào lệnh hay Git.
+
 ### 1. Cài đặt dependencies
 
 ```bash
@@ -19,18 +21,20 @@ npm install
 
 ### 2. Cấu hình biến môi trường
 
-File `.env` đã được tạo sẵn với các giá trị mặc định. Kiểm tra và chỉnh sửa nếu cần:
+Tạo `.env` cục bộ hoặc đặt biến môi trường trên dịch vụ deploy. Không dùng mật khẩu hay khóa mẫu trong source:
 
 ```env
 PORT=5000
-SUPABASE_URL=https://eesmptzrdlcdzdygblfm.supabase.co
-SUPABASE_ANON_KEY=...
+SUPABASE_URL=<your-supabase-url>
 SUPABASE_SERVICE_ROLE_KEY=...
 GEMINI_API_KEY=...
-JWT_SECRET=checkluadao_jwt_secret_2024_very_long_random_string
+JWT_SECRET=<long-random-secret>
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD_HASH=...   # bcrypt hash của password admin
+STORE_SCAN_TEMPLATES=false
 ```
+
+API public trả cả mẫu `is_approved=true` và `is_approved=false`. Không bật `STORE_SCAN_TEMPLATES` trước khi có cơ chế xin phép và che dữ liệu cá nhân: mẫu mới lưu sẽ có thể được đọc công khai ngay. Khách truy cập không bị giới hạn số lượt quét ở tầng ứng dụng.
 
 ### 3. Setup Supabase Database
 
@@ -63,8 +67,8 @@ Server sẽ chạy tại: `http://localhost:5000`
 | `GET`  | `/api/health` | Health check |
 | `POST` | `/api/auth/login` | Đăng nhập admin |
 | `POST` | `/api/check` | OCR ảnh cục bộ rồi phân tích văn bản (multipart) |
-| `GET`  | `/api/templates` | Danh sách mẫu đã duyệt |
-| `GET`  | `/api/templates/:id` | Chi tiết mẫu đã duyệt |
+| `GET`  | `/api/templates` | Danh sách mẫu đã và chưa kiểm duyệt, có `is_approved` |
+| `GET`  | `/api/templates/:id` | Chi tiết mẫu đã và chưa kiểm duyệt |
 
 ### Admin (yêu cầu Bearer Token)
 
@@ -120,7 +124,7 @@ Response:
 ```bash
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin@checkluadao2024"}'
+  -d '{"username": "admin", "password": "<your-admin-password>"}'
 ```
 
 Response:
@@ -168,4 +172,4 @@ backend/
 - File `.env` **không được commit** lên git (đã có trong `.gitignore`)
 - Chạy `supabase_schema.sql` trong **Supabase SQL Editor** trước khi dùng
 - API key Gemini có thể thêm qua `/api/admin/api-keys` sau khi login
-- Mẫu lừa đảo khi phát hiện sẽ được lưu với `is_approved=false`, admin cần duyệt qua `/api/admin/templates`
+- Mặc định lượt quét không được lưu thành mẫu (`STORE_SCAN_TEMPLATES=false`). Nếu bật lưu sau khi có cơ chế đồng ý và xóa dữ liệu, mọi mẫu mới có `is_approved=false` nhưng vẫn công khai ngay; `/api/admin/templates` dùng để cập nhật trạng thái kiểm duyệt.
