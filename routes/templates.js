@@ -265,7 +265,7 @@ function redactPublicText(value) {
   return value
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[đã ẩn email]')
     .replace(/(?<!\d)\d{9,12}(?!\d)/g, '[đã ẩn số liên hệ]')
-    .replace(/((?:OTP|mã xác thực|mã xác minh)\D{0,16})\d{4,8}/gi, '$1[đã ẩn mã]');
+    .replace(/((?:OTP|mã(?: xác thực| xác minh| OTP)?)\D{0,16})\d{4,8}/gi, '$1[đã ẩn mã]');
 }
 
 function redactPublicValue(value) {
@@ -280,7 +280,7 @@ function redactPublicValue(value) {
 /** Sanitize free-form public fields before sending either review state. */
 export function publicTemplate(tpl) {
   const result = { ...tpl };
-  for (const field of ['title', 'analysis', 'attack_target', 'warning_points', 'messages_json']) {
+  for (const field of ['title', 'analysis', 'attack_target', 'warning_points', 'messages_json', 'multi_agent_debate']) {
     if (field in result) result[field] = redactPublicValue(result[field]);
   }
   return result;
@@ -406,7 +406,7 @@ router.get('/:id', async (req, res) => {
     try {
       let { data, error } = await supabase
         .from('scam_templates')
-        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, messages_json, is_approved, created_at')
+        .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, messages_json, multi_agent_debate, is_approved, created_at')
         .eq('id', id)
         .maybeSingle();
 

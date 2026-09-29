@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
 
 /**
  * Danh sách model Gemini Flash được hỗ trợ từ 2.5 Flash đến 3.5 Flash (KHÔNG dùng dòng Lite)
@@ -285,11 +286,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       ? parsed.exfiltrationVector
       : (parsed.isScam ? 'phishing_link' : 'none');
 
-    const multiAgentDebate = {
-      threatHunterAnalysis: parsed.multiAgentDebate?.threatHunterAnalysis || 'Đã phân tích các chỉ số rủi ro ngôn ngữ và tâm lý.',
-      auditorDefense: parsed.multiAgentDebate?.auditorDefense || 'Đã kiểm tra ma trận kênh chiếm đoạt dữ liệu và tài sản.',
-      arbiterVerdict: parsed.multiAgentDebate?.arbiterVerdict || 'Đạt đồng thuận phán quyết an toàn an ninh mạng.',
-    };
+    const multiAgentDebate = completeMultiAgentDebate(parsed.multiAgentDebate);
 
     return {
       isChatScreenshot: parsed.isChatScreenshot ?? true,
@@ -302,7 +299,7 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       multiAgentDebate,
       analysis: parsed.isChatScreenshot === false
         ? (parsed.analysis || 'Không tìm thấy nội dung tin nhắn cần kiểm tra. Vui lòng chụp lại màn hình rõ ràng hơn.')
-        : (parsed.multiAgentDebate?.arbiterVerdict || parsed.analysis || ''),
+        : (multiAgentDebate?.arbiterVerdict || parsed.analysis || ''),
       warningPoints: Array.isArray(parsed.warningPoints) ? parsed.warningPoints : [],
       recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
       extractedUrls: Array.isArray(parsed.extractedUrls) ? parsed.extractedUrls : [],

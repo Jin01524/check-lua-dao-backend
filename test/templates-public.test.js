@@ -22,6 +22,11 @@ const pending = {
   confidence_score: 90,
   is_approved: false,
   messages_json: [{ sender: 'unknown', text: 'Mã xác thực 654321 gửi tới 0987654321' }],
+  multi_agent_debate: {
+    threatHunterAnalysis: 'Số 0912345678 yêu cầu OTP.',
+    auditorDefense: 'Không có bằng chứng an toàn từ fake@example.com.',
+    arbiterVerdict: 'Rủi ro cao vì mã 654321.',
+  },
 };
 const safe = {
   id: '22222222-2222-4222-8222-222222222222',
@@ -40,13 +45,13 @@ test('public library excludes safe messages while keeping both review states and
     queries.push(url);
     assert.equal(url.pathname, '/rest/v1/scam_templates');
 
-    if (url.searchParams.get('select')?.includes('confidence_score')) {
+    const id = url.searchParams.get('id')?.replace(/^eq\./, '');
+    if (!id && url.searchParams.get('select')?.includes('confidence_score')) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ code: '42703', message: 'column confidence_score does not exist' }));
       return;
     }
 
-    const id = url.searchParams.get('id')?.replace(/^eq\./, '');
     let rows = [approved, safe, pending].filter((item) => !id || item.id === id);
     if (url.searchParams.get('scam_type') === 'neq.Tin nhắn an toàn / Bình thường') {
       rows = rows.filter((item) => item.scam_type !== safe.scam_type);
@@ -99,6 +104,9 @@ test('public library excludes safe messages while keeping both review states and
   assert.equal(detailBody.is_approved, false);
   assert.ok(!JSON.stringify(detailBody).includes('0987654321'));
   assert.ok(!JSON.stringify(detailBody).includes('654321'));
+  assert.ok(detailBody.multi_agent_debate);
+  assert.ok(!JSON.stringify(detailBody.multi_agent_debate).includes('0912345678'));
+  assert.ok(!JSON.stringify(detailBody.multi_agent_debate).includes('fake@example.com'));
   const safeDetail = await fetch(`${base}/api/templates/${safe.id}`);
   assert.equal(safeDetail.status, 404);
   assert.ok(queries.every((url) => !url.searchParams.has('is_approved')));

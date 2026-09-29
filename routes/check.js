@@ -4,6 +4,7 @@ import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
 import { recordScanInDB, sessionStats } from './stats.js';
+import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
 
 const router = express.Router();
 
@@ -193,10 +194,11 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   const numScore = Number(analysisResult.confidenceScore) || 0;
   const hasRisk = Boolean(analysisResult.isScam) || numScore >= 40;
   const hasContent = Boolean(analysisResult.isChatScreenshot) || Boolean(textContent) || files.length > 0;
+  const debateToSave = completeMultiAgentDebate(analysisResult.multiAgentDebate);
 
   // Do not retain raw user messages by default. Explicitly opt in only after
   // the product has a documented consent, redaction and deletion policy.
-  if (hasContent && process.env.STORE_SCAN_TEMPLATES === 'true') {
+  if (hasContent && analysisResult.isChatScreenshot !== false && debateToSave && process.env.STORE_SCAN_TEMPLATES === 'true') {
     const messagesToSave = Array.isArray(analysisResult.messages) && analysisResult.messages.length > 0
       ? analysisResult.messages
       : (textContent ? [{ sender: 'user', text: textContent }] : []);
@@ -218,7 +220,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         confidence_score: numScore,
         warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
         exfiltration_vector: analysisResult.exfiltrationVector || 'none',
-        multi_agent_debate: analysisResult.multiAgentDebate || null,
+        multi_agent_debate: debateToSave,
       };
 
       let { data: savedTemplate, error: saveError } = await supabase
@@ -227,17 +229,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         .select('id')
         .single();
 
-      if (saveError) {
-        const fallbackResult = await supabase
-          .from('scam_templates')
-          .insert(baseTemplate)
-          .select('id')
-          .single();
-        savedTemplate = fallbackResult.data;
-        if (fallbackResult.error) {
-          console.error('[Check] Failed to save template fallback:', fallbackResult.error.message);
-        }
-      }
+      if (saveError) console.error('[Check] Failed to save complete template:', saveError.message);
 
       if (savedTemplate?.id) {
         savedTemplateId = savedTemplate.id;
@@ -260,7 +252,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         confidence_score: numScore,
         warning_points: [],
         exfiltration_vector: analysisResult.exfiltrationVector || 'none',
-        multi_agent_debate: analysisResult.multiAgentDebate || null,
+        multi_agent_debate: debateToSave,
       };
 
       try {
@@ -270,9 +262,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
           .select('id')
           .single();
 
-        if (safeErr) {
-          await supabase.from('scam_templates').insert(safeTemplate);
-        }
+        if (safeErr) console.error('[Check] Failed to save complete safe template:', safeErr.message);
         if (savedSafe?.id) {
           savedTemplateId = savedSafe.id;
         }
@@ -281,6 +271,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         console.warn('[Check] Could not save safe reference message:', safeErr.message);
       }
     }
+  } else if (hasContent && process.env.STORE_SCAN_TEMPLATES === 'true' && !debateToSave) {
+    console.warn('[Check] Template not saved: AI did not return all three analyses.');
   }
 
   // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
