@@ -22,7 +22,46 @@ router.post('/login', async (req, res) => {
     return res.status(503).json({ error: 'Hệ thống đăng nhập chưa được cấu hình' });
   }
 
-  // 1. Kiểm tra xem có phải Admin không
+  // A database account takes precedence when it shares the environment admin's name.
+  // Otherwise the environment password can hide a valid database password forever.
+  let user = null;
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { data, error } = await getSupabaseClient()
+      .from('users')
+      .select('id, username, password_hash, role, is_active')
+      .eq('username', cleanUsername)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(503).json({ error: 'Không thể kiểm tra tài khoản lúc này. Vui lòng thử lại.' });
+    }
+    user = data;
+  }
+
+  if (user) {
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'Tài khoản này đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.' });
+    }
+
+    if (!user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
+    }
+
+    const assignedRole = ['admin', 'moderator', 'user'].includes(user.role) ? user.role : 'user';
+    const token = jwt.sign(
+      { username: user.username, role: assignedRole, id: user.id },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+
+    return res.json({
+      message: 'Đăng nhập thành công',
+      token,
+      user: { username: user.username, role: assignedRole },
+    });
+  }
+
+  // Environment admin remains available only when no database row has this name.
   if (process.env.ADMIN_USERNAME && cleanUsername === process.env.ADMIN_USERNAME.toLowerCase()) {
     const passwordHash = process.env.ADMIN_PASSWORD_HASH;
     const isMatch = passwordHash ? await bcrypt.compare(password, passwordHash) : false;
@@ -45,40 +84,7 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  // 2. Kiểm tra tài khoản trong bảng users (hỗ trợ cả admin và user thường)
-  const { data: user, error } = await getSupabaseClient()
-    .from('users')
-    .select('id, username, password_hash, role, is_active')
-    .eq('username', cleanUsername)
-    .maybeSingle();
-
-  if (error || !user) {
-    return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
-  }
-
-  // Kiểm tra tài khoản có bị khóa không
-  if (user.is_active === false) {
-    return res.status(403).json({ error: 'Tài khoản này đã bị khóa bởi Quản trị viên. Vui lòng liên hệ hỗ trợ.' });
-  }
-
-  if (!user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
-    return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
-  }
-
-  const assignedRole = ['admin', 'moderator', 'user'].includes(user.role) ? user.role : 'user';
-
-  // Tạo token
-  const token = jwt.sign(
-    { username: user.username, role: assignedRole, id: user.id },
-    jwtSecret,
-    { expiresIn: '24h' }
-  );
-
-  res.json({
-    message: 'Đăng nhập thành công',
-    token,
-    user: { username: user.username, role: assignedRole },
-  });
+  return res.status(401).json({ error: 'Thông tin đăng nhập không chính xác' });
 });
 
 export default router;

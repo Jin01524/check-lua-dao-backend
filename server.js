@@ -85,6 +85,9 @@ app.use('/api/stats', statsRoutes);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
+  if (process.env.RENDER_GIT_COMMIT) {
+    res.set('X-Deploy-Revision', process.env.RENDER_GIT_COMMIT.slice(0, 12));
+  }
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
