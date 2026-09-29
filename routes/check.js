@@ -4,7 +4,7 @@ import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
 import { recordScanInDB, sessionStats } from './stats.js';
-import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
+import { saveScanTemplate } from '../services/templateStorage.js';
 
 const router = express.Router();
 
@@ -189,90 +189,13 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   }
   const analysisFinishedAt = performance.now();
 
-  // ── Lưu trữ tin nhắn vào DB (Cả mẫu rủi ro và mẫu an toàn) ──────────────
-  let savedTemplateId = null;
+  // ── Lưu mẫu mới gồm ba phân tích AI ─────────────────────────────────────
   const numScore = Number(analysisResult.confidenceScore) || 0;
-  const hasRisk = Boolean(analysisResult.isScam) || numScore >= 40;
-  const hasContent = Boolean(analysisResult.isChatScreenshot) || Boolean(textContent) || files.length > 0;
-  const debateToSave = completeMultiAgentDebate(analysisResult.multiAgentDebate);
-
-  // Do not retain raw user messages by default. Explicitly opt in only after
-  // the product has a documented consent, redaction and deletion policy.
-  if (hasContent && analysisResult.isChatScreenshot !== false && debateToSave && process.env.STORE_SCAN_TEMPLATES === 'true') {
-    const messagesToSave = Array.isArray(analysisResult.messages) && analysisResult.messages.length > 0
-      ? analysisResult.messages
-      : (textContent ? [{ sender: 'user', text: textContent }] : []);
-
-    if (hasRisk && (analysisResult.title || analysisResult.scamType)) {
-      // 1. Tin nhắn có rủi ro: Lưu vào kho mẫu lừa đảo (trạng thái Chưa kiểm định is_approved = false)
-      const baseTemplate = {
-        title: analysisResult.title || analysisResult.scamType || 'Nghi vấn tin nhắn lừa đảo mới',
-        platform,
-        scam_type: analysisResult.scamType || 'Nghi vấn lừa đảo',
-        analysis: analysisResult.analysis || '',
-        messages_json: messagesToSave,
-        is_approved: false,
-      };
-
-      let insertData = {
-        ...baseTemplate,
-        attack_target: analysisResult.attackTarget || 'Không rõ',
-        confidence_score: numScore,
-        warning_points: Array.isArray(analysisResult.warningPoints) ? analysisResult.warningPoints : [],
-        exfiltration_vector: analysisResult.exfiltrationVector || 'none',
-        multi_agent_debate: debateToSave,
-      };
-
-      let { data: savedTemplate, error: saveError } = await supabase
-        .from('scam_templates')
-        .insert(insertData)
-        .select('id')
-        .single();
-
-      if (saveError) console.error('[Check] Failed to save complete template:', saveError.message);
-
-      if (savedTemplate?.id) {
-        savedTemplateId = savedTemplate.id;
-        console.log(`[Check] Scam template saved with id: ${savedTemplateId} (chưa được kiểm định)`);
-      }
-    } else {
-      // 2. Tin nhắn không rủi ro vẫn cần kiểm duyệt trước mọi lần sử dụng lại.
-      const safeTemplate = {
-        title: analysisResult.title || 'Tin nhắn an toàn / Bình thường',
-        platform,
-        scam_type: 'Tin nhắn an toàn / Bình thường',
-        analysis: analysisResult.analysis || 'Tin nhắn hợp lệ, không có dấu hiệu thao túng hay lừa đảo.',
-        messages_json: messagesToSave,
-        is_approved: false,
-      };
-
-      let insertSafeData = {
-        ...safeTemplate,
-        attack_target: 'Không có',
-        confidence_score: numScore,
-        warning_points: [],
-        exfiltration_vector: analysisResult.exfiltrationVector || 'none',
-        multi_agent_debate: debateToSave,
-      };
-
-      try {
-        let { data: savedSafe, error: safeErr } = await supabase
-          .from('scam_templates')
-          .insert(insertSafeData)
-          .select('id')
-          .single();
-
-        if (safeErr) console.error('[Check] Failed to save complete safe template:', safeErr.message);
-        if (savedSafe?.id) {
-          savedTemplateId = savedSafe.id;
-        }
-        console.log(`[Check] Stored non-risk message pending review (score: ${numScore}%)`);
-      } catch (safeErr) {
-        console.warn('[Check] Could not save safe reference message:', safeErr.message);
-      }
-    }
-  } else if (hasContent && process.env.STORE_SCAN_TEMPLATES === 'true' && !debateToSave) {
-    console.warn('[Check] Template not saved: AI did not return all three analyses.');
+  let templateSave = { id: null, status: 'database_error' };
+  try {
+    templateSave = await saveScanTemplate({ supabase, analysisResult, platform });
+  } catch (saveError) {
+    console.error('[Check] Could not save scan template:', saveError.message);
   }
 
   // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
@@ -293,7 +216,8 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     platform,
     imageCount: files.length,
     hasText: Boolean(textContent),
-    savedTemplateId,
+    savedTemplateId: templateSave.id,
+    templateSaveStatus: templateSave.status,
     ocrUsed,
     ocrExtractedText: ocrExtractedText || null,
   });

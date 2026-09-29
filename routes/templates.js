@@ -1,5 +1,6 @@
 import express from 'express';
 import { getSupabaseClient } from '../lib/supabase.js';
+import { redactTemplateValue } from '../lib/redactTemplate.js';
 
 const router = express.Router();
 
@@ -260,28 +261,11 @@ export function getConsistentScore(tpl) {
   return null;
 }
 
-function redactPublicText(value) {
-  if (typeof value !== 'string') return value;
-  return value
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[đã ẩn email]')
-    .replace(/(?<!\d)\d{9,12}(?!\d)/g, '[đã ẩn số liên hệ]')
-    .replace(/((?:OTP|mã(?: xác thực| xác minh| OTP)?)\D{0,16})\d{4,8}/gi, '$1[đã ẩn mã]');
-}
-
-function redactPublicValue(value) {
-  if (typeof value === 'string') return redactPublicText(value);
-  if (Array.isArray(value)) return value.map(redactPublicValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactPublicValue(item)]));
-  }
-  return value;
-}
-
 /** Sanitize free-form public fields before sending either review state. */
 export function publicTemplate(tpl) {
   const result = { ...tpl };
   for (const field of ['title', 'analysis', 'attack_target', 'warning_points', 'messages_json', 'multi_agent_debate']) {
-    if (field in result) result[field] = redactPublicValue(result[field]);
+    if (field in result) result[field] = redactTemplateValue(result[field]);
   }
   return result;
 }

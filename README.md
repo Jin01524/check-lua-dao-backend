@@ -31,10 +31,9 @@ GEMINI_API_KEY=...
 JWT_SECRET=<long-random-secret>
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD_HASH=...   # bcrypt hash của password admin
-STORE_SCAN_TEMPLATES=false
 ```
 
-API public trả cả mẫu `is_approved=true` và `is_approved=false`. Không bật `STORE_SCAN_TEMPLATES` trước khi có cơ chế xin phép và che dữ liệu cá nhân: mẫu mới lưu sẽ có thể được đọc công khai ngay. Khách truy cập không bị giới hạn số lượt quét ở tầng ứng dụng.
+Mỗi lượt quét có nội dung hợp lệ và đủ ba phân tích AI sẽ tự lưu thành mẫu `is_approved=false`. API public trả cả mẫu đã duyệt và chưa duyệt; mẫu an toàn chỉ xuất hiện trong bàn quản trị. Backend chỉ lưu tin nhắn đã được AI trích xuất và che thêm email, số liên hệ, mã xác thực; không lưu nguyên văn đầu vào khi AI không trích xuất được tin nhắn. Phản hồi `/api/check` có `templateSaveStatus` để phân biệt đã lưu, thiếu phân tích AI và lỗi cơ sở dữ liệu. Khách truy cập không bị giới hạn số lượt quét ở tầng ứng dụng.
 
 ### 3. Setup Supabase Database
 
@@ -172,4 +171,4 @@ backend/
 - File `.env` **không được commit** lên git (đã có trong `.gitignore`)
 - Chạy `supabase_schema.sql` trong **Supabase SQL Editor** trước khi dùng
 - API key Gemini có thể thêm qua `/api/admin/api-keys` sau khi login
-- Mặc định lượt quét không được lưu thành mẫu (`STORE_SCAN_TEMPLATES=false`). Nếu bật lưu sau khi có cơ chế đồng ý và xóa dữ liệu, mọi mẫu mới có `is_approved=false` nhưng vẫn công khai ngay; `/api/admin/templates` dùng để cập nhật trạng thái kiểm duyệt.
+- Mẫu rủi ro mới có `is_approved=false` nhưng vẫn công khai ngay; `/api/admin/templates` dùng để cập nhật trạng thái kiểm duyệt. Mẫu an toàn được lưu để đối chiếu và chỉ hiện trong bàn quản trị.
