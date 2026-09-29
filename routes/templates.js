@@ -225,6 +225,7 @@ export const CURATED_TEMPLATES = [
  */
 function filterCurated(platform, search) {
   return CURATED_TEMPLATES.filter((tpl) => {
+    if (tpl.scam_type === 'Tin nhắn an toàn / Bình thường') return false;
     const matchesPlatform =
       !platform ||
       platform.toUpperCase() === 'ALL' ||
@@ -287,7 +288,7 @@ export function publicTemplate(tpl) {
 
 /**
  * GET /api/templates
- * Lấy danh sách mẫu công khai, gồm cả mẫu chưa được kiểm duyệt.
+ * Lấy danh sách mẫu cảnh báo công khai, gồm cả mẫu chưa được kiểm duyệt.
  */
 router.get('/', async (req, res) => {
   const { platform, limit = 50, offset = 0, search } = req.query;
@@ -307,6 +308,7 @@ router.get('/', async (req, res) => {
       let query = supabase
         .from('scam_templates')
         .select('id, title, platform, scam_type, analysis, attack_target, confidence_score, warning_points, is_approved, created_at', { count: 'exact' })
+        .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .range(start, start + pageSize - 1);
@@ -328,6 +330,7 @@ router.get('/', async (req, res) => {
         let basicQuery = supabase
           .from('scam_templates')
           .select('id, title, platform, scam_type, analysis, is_approved, created_at', { count: 'exact' })
+          .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(start, start + pageSize - 1);
@@ -349,7 +352,7 @@ router.get('/', async (req, res) => {
         }
       }
 
-      // Giữ nguyên mọi trạng thái kiểm duyệt và tổng số bản ghi để phân trang đúng.
+      // Giữ cả hai trạng thái kiểm duyệt; tổng và phân trang chỉ tính mẫu cảnh báo.
       if (!error && data && data.length > 0) {
         const enriched = data.map(item => ({
           ...item,
@@ -386,7 +389,7 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/templates/:id
- * Lấy chi tiết 1 mẫu công khai, gồm cả mẫu chưa được kiểm duyệt.
+ * Lấy chi tiết 1 mẫu cảnh báo công khai, gồm cả mẫu chưa được kiểm duyệt.
  */
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
@@ -415,6 +418,10 @@ router.get('/:id', async (req, res) => {
           .maybeSingle();
         data = fallback.data;
         error = fallback.error;
+      }
+
+      if (!error && data?.scam_type === 'Tin nhắn an toàn / Bình thường') {
+        return res.status(404).json({ error: 'Template not found' });
       }
 
       if (!error && data) {

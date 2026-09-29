@@ -23,8 +23,17 @@ const pending = {
   is_approved: false,
   messages_json: [{ sender: 'unknown', text: 'Mã xác thực 654321 gửi tới 0987654321' }],
 };
+const safe = {
+  id: '22222222-2222-4222-8222-222222222222',
+  title: 'Tin nhắn thông thường',
+  platform: 'SMS',
+  scam_type: 'Tin nhắn an toàn / Bình thường',
+  analysis: 'Dữ liệu giả lập',
+  confidence_score: 10,
+  is_approved: true,
+};
 
-test('public list and detail include both review states', async (context) => {
+test('public library excludes safe messages while keeping both review states and pagination', async (context) => {
   const queries = [];
   const database = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -38,9 +47,16 @@ test('public list and detail include both review states', async (context) => {
     }
 
     const id = url.searchParams.get('id')?.replace(/^eq\./, '');
-    const rows = [approved, pending].filter((item) => !id || item.id === id);
+    let rows = [approved, safe, pending].filter((item) => !id || item.id === id);
+    if (url.searchParams.get('scam_type') === 'neq.Tin nhắn an toàn / Bình thường') {
+      rows = rows.filter((item) => item.scam_type !== safe.scam_type);
+    }
+    const total = rows.length;
+    const offset = Number(url.searchParams.get('offset') || 0);
+    const limit = Number(url.searchParams.get('limit') || rows.length);
+    rows = rows.slice(offset, offset + limit);
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Range', `0-${Math.max(0, rows.length - 1)}/${rows.length}`);
+    res.setHeader('Content-Range', `${offset}-${Math.max(offset, offset + rows.length - 1)}/${total}`);
     res.end(JSON.stringify(rows));
   });
   database.listen(0, '127.0.0.1');
@@ -64,9 +80,18 @@ test('public list and detail include both review states', async (context) => {
   const body = await list.json();
   assert.deepEqual(body.data.map((item) => item.id), [approved.id, pending.id]);
   assert.deepEqual(body.data.map((item) => item.is_approved), [true, false]);
+  assert.equal(body.total, 2);
+  assert.equal(body.hasMore, false);
   assert.ok(!body.data[1].analysis.includes('0912345678'));
   assert.ok(!body.data[1].analysis.includes('fake@example.com'));
   assert.ok(!body.data[1].analysis.includes('123456'));
+
+  const secondPage = await fetch(`${base}/api/templates?limit=1&offset=1`);
+  assert.equal(secondPage.status, 200);
+  const secondBody = await secondPage.json();
+  assert.deepEqual(secondBody.data.map((item) => item.id), [pending.id]);
+  assert.equal(secondBody.total, 2);
+  assert.equal(secondBody.hasMore, false);
 
   const detail = await fetch(`${base}/api/templates/${pending.id}`);
   assert.equal(detail.status, 200);
@@ -74,6 +99,11 @@ test('public list and detail include both review states', async (context) => {
   assert.equal(detailBody.is_approved, false);
   assert.ok(!JSON.stringify(detailBody).includes('0987654321'));
   assert.ok(!JSON.stringify(detailBody).includes('654321'));
+  const safeDetail = await fetch(`${base}/api/templates/${safe.id}`);
+  assert.equal(safeDetail.status, 404);
   assert.ok(queries.every((url) => !url.searchParams.has('is_approved')));
   assert.ok(queries.some((url) => url.searchParams.get('select')?.includes('confidence_score')));
+  assert.ok(queries.filter((url) => !url.searchParams.has('id')).every(
+    (url) => url.searchParams.get('scam_type') === 'neq.Tin nhắn an toàn / Bình thường'
+  ));
 });
