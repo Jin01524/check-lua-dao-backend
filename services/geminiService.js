@@ -185,6 +185,11 @@ Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI log
    - Nếu Hunter chỉ cảnh báo từ khóa còn Auditor chưa thấy kênh chiếm đoạt, cân nhắc nội dung đầy đủ; nếu đoạn ngắn hoặc danh tính/kịch bản chưa rõ, nói chưa đủ ngữ cảnh thay vì xác nhận an toàn.
    - Nếu có Kênh Chiếm Đoạt rõ ràng -> Phán quyết: LỪA ĐẢO / RỦI RO CAO.
 
+QUY ƯỚC ĐIỂM RỦI RO:
+- "confidenceScore" là ĐIỂM RỦI RO, không phải độ tự tin vào kết luận. Chỉ trả số nguyên từ 0 đến 100: rủi ro càng cao thì điểm càng cao.
+- Nếu isScam=true, điểm phải từ 40 đến 100; nếu isScam=false, điểm phải từ 0 đến 39. Không đảo chiều thang điểm khi tin nhắn có vẻ an toàn.
+- Nếu bằng chứng quá ít để chấm điểm, trả confidenceScore=null và contextSufficiency="insufficient"; không đoán điểm thấp chỉ vì chưa thấy dấu hiệu trong đoạn ngắn.
+
 ======================================================================
 QUY CHUẨN ĐẦU VÀO:
 - Nếu văn bản OCR không chứa nội dung tin nhắn/thông báo cần kiểm tra:
@@ -295,7 +300,8 @@ ${contextFlowEnabled ? `Nếu chỉ có một câu ngắn, thiếu mục đích/
       scamType: parsed.scamType || null,
       title: parsed.title || null,
       attackTarget: (parsed.attackTarget && String(parsed.attackTarget).trim()) || 'Không rõ',
-      confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : (contextFlowEnabled ? null : 0),
+      confidenceScore: Number.isInteger(parsed.confidenceScore) && parsed.confidenceScore >= 0 && parsed.confidenceScore <= 100
+        ? parsed.confidenceScore : null,
       contextSufficiency: parsed.contextSufficiency === 'insufficient' ? 'insufficient' : 'sufficient',
       suggestedReply: typeof parsed.suggestedReply === 'string' ? parsed.suggestedReply : null,
       exfiltrationVector,

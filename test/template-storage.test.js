@@ -64,3 +64,16 @@ test('missing AI analysis and database failure return explicit save status', asy
   const failed = await saveScanTemplate({ supabase: db, analysisResult, platform: 'SMS', logger });
   assert.equal(failed.status, 'database_error');
 });
+
+test('conflicting risk score cannot create a misleading template', async () => {
+  const db = fakeDatabase();
+  const logger = { warn() {}, error() {} };
+  for (const candidate of [
+    { ...analysisResult, confidenceScore: 7 },
+    { ...analysisResult, isScam: false, confidenceScore: 93 },
+  ]) {
+    const result = await saveScanTemplate({ supabase: db, analysisResult: candidate, platform: 'SMS', logger });
+    assert.deepEqual(result, { id: null, status: 'deferred_review' });
+  }
+  assert.equal(db.writes.length, 0);
+});

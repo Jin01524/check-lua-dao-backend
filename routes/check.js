@@ -5,7 +5,7 @@ import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
 import { isActiveScanSession, recordScanInDB, reviseScanInDB, sessionStats } from './stats.js';
 import { saveScanTemplate } from '../services/templateStorage.js';
-import { assessContext } from '../lib/contextFlow.js';
+import { assessContext, riskScoreAssessment } from '../lib/contextFlow.js';
 import { createHash } from 'node:crypto';
 
 const router = express.Router();
@@ -272,14 +272,13 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
     round,
   }) : null;
   // ── Lưu mẫu mới gồm ba phân tích AI ─────────────────────────────────────
-  const numScore = Number(analysisResult.confidenceScore) || 0;
-  const modelDisagreement = v2 && assessment.status === 'high_risk'
-    && !analysisResult.isScam && numScore < 40;
+  const { score: riskScore, conflictsWithVerdict } = riskScoreAssessment(analysisResult);
+  const modelDisagreement = v2 && assessment.status === 'high_risk' && !analysisResult.isScam;
   let templateSave = { id: null, status: 'database_error' };
-  if (v2 && ['insufficient_context', 'invalid_input'].includes(assessment.status)) {
-    templateSave.status = 'deferred_insufficient_context';
-  } else if (modelDisagreement) {
+  if (modelDisagreement || conflictsWithVerdict) {
     templateSave.status = 'deferred_review';
+  } else if (v2 && ['insufficient_context', 'invalid_input'].includes(assessment.status)) {
+    templateSave.status = 'deferred_insufficient_context';
   } else {
     try {
       templateSave = await saveScanTemplate({ supabase, analysisResult, platform });
@@ -302,7 +301,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
       scanSessionId = await recordScanInDB({
         platform,
         isScam: v2 ? assessment.status === 'high_risk' : Boolean(analysisResult.isScam),
-        confidenceScore: v2 ? assessment.riskScore : numScore,
+        confidenceScore: v2 ? assessment.riskScore : riskScore,
         scamType: analysisResult.scamType || null,
       });
     }
@@ -319,6 +318,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
       warningPoints: ['Có yêu cầu nhạy cảm cần xác minh độc lập.'],
       recommendations: ['Không trả lời hoặc thực hiện yêu cầu trong cuộc chat này.', 'Tự tìm kênh chính thức để xác minh.'],
     } : {}),
+    ...(!v2 ? { confidenceScore: riskScore } : {}),
     ...(v2 ? {
       isScam: assessment.status === 'high_risk',
       confidenceScore: assessment.riskScore,

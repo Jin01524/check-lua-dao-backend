@@ -1,5 +1,6 @@
 import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
 import { redactTemplateValue } from '../lib/redactTemplate.js';
+import { riskScoreAssessment } from '../lib/contextFlow.js';
 
 export async function saveScanTemplate({ supabase, analysisResult, platform, logger = console }) {
   if (analysisResult.isChatScreenshot === false) {
@@ -12,8 +13,12 @@ export async function saveScanTemplate({ supabase, analysisResult, platform, log
     return { id: null, status: 'incomplete_analysis' };
   }
 
-  const score = Number(analysisResult.confidenceScore) || 0;
-  const hasRisk = Boolean(analysisResult.isScam) || score >= 40;
+  const { score, conflictsWithVerdict } = riskScoreAssessment(analysisResult);
+  if (score == null || conflictsWithVerdict) {
+    logger.warn('[Check] Template not saved: risk score is missing or conflicts with the verdict.');
+    return { id: null, status: 'deferred_review' };
+  }
+  const hasRisk = analysisResult.isScam === true;
   const template = redactTemplateValue({
     title: analysisResult.title || (hasRisk ? analysisResult.scamType || 'Nghi vấn tin nhắn lừa đảo mới' : 'Tin nhắn an toàn / Bình thường'),
     platform,

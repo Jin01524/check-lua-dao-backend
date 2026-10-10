@@ -69,4 +69,7 @@ test('login, admin roles and public templates', async (context) => {
 test('template score is never invented when absent', () => {
   assert.equal(getConsistentScore({ id: 'missing-score' }), null);
   assert.equal(getConsistentScore({ confidence_score: 0.91 }), 91);
+  assert.equal(getConsistentScore({ confidence_score: 1, scam_type: 'Tin nhắn an toàn / Bình thường' }), 1);
+  assert.equal(getConsistentScore({ confidence_score: 8, scam_type: 'Nghi vấn lừa đảo' }), null);
+  assert.equal(getConsistentScore({ confidence_score: 92, scam_type: 'Tin nhắn an toàn / Bình thường' }), null);
 });

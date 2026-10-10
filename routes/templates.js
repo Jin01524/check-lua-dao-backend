@@ -242,23 +242,15 @@ function filterCurated(platform, search) {
   });
 }
 
-/** Preserve the recorded score; missing evidence must not become a fabricated percentage. */
+/** Preserve recorded risk scores only when they agree with the stored risk category. */
 export function getConsistentScore(tpl) {
-  if (tpl?.scam_type === 'Tin nhắn an toàn / Bình thường' || tpl?.is_safe) {
-    if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
-      return Math.round(Number(tpl.confidence_score));
-    }
-    return null;
-  }
-  if (tpl?.confidence_score != null && !isNaN(Number(tpl.confidence_score))) {
-    const s = Number(tpl.confidence_score);
-    return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
-  }
-  if (tpl?.danger_level != null && !isNaN(Number(tpl.danger_level))) {
-    const s = Number(tpl.danger_level);
-    return s > 0 && s <= 1 ? Math.round(s * 100) : Math.round(s);
-  }
-  return null;
+  const raw = tpl?.confidence_score ?? tpl?.danger_level;
+  if (raw == null || !Number.isFinite(Number(raw))) return null;
+  const value = Number(raw);
+  const score = value > 0 && value < 1 ? Math.round(value * 100) : Math.round(value);
+  if (score < 0 || score > 100) return null;
+  const isSafe = tpl?.scam_type === 'Tin nhắn an toàn / Bình thường' || tpl?.is_safe;
+  return isSafe ? (score < 40 ? score : null) : (score >= 40 ? score : null);
 }
 
 /** Sanitize free-form public fields before sending either review state. */

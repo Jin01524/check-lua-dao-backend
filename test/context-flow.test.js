@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessContext, hasDirectDanger, safeSuggestedReply } from '../lib/contextFlow.js';
+import { assessContext, hasDirectDanger, riskScoreAssessment, safeSuggestedReply } from '../lib/contextFlow.js';
 
 const base = {
   isChatScreenshot: true,
@@ -56,4 +56,38 @@ test('new short replies remain inconclusive and complete context can be low risk
   });
   assert.equal(withoutScore.riskScore, null);
   assert.equal(withoutScore.status, 'insufficient_context');
+});
+
+test('risk score increases with risk and cannot reverse the AI verdict', () => {
+  const text = 'Tôi sẽ gặp bạn ở thư viện ngày mai để trao đổi về bài tập nhóm của lớp học.';
+  const safe = assessContext({
+    analysisResult: { ...base, confidenceScore: 5, contextSufficiency: 'sufficient' },
+    textContent: text,
+  });
+  assert.equal(safe.status, 'low_risk');
+  assert.equal(safe.riskScore, 5);
+
+  const risky = assessContext({
+    analysisResult: { ...base, isScam: true, confidenceScore: 91 },
+    textContent: text,
+  });
+  assert.equal(risky.status, 'high_risk');
+  assert.equal(risky.riskScore, 91);
+
+  const lowScoreRisky = assessContext({
+    analysisResult: { ...base, isScam: true, confidenceScore: 8 },
+    textContent: text,
+  });
+  assert.equal(lowScoreRisky.status, 'high_risk');
+  assert.equal(lowScoreRisky.riskScore, null);
+
+  const highScoreSafe = assessContext({
+    analysisResult: { ...base, confidenceScore: 92, contextSufficiency: 'sufficient' },
+    textContent: text,
+  });
+  assert.equal(highScoreSafe.status, 'insufficient_context');
+  assert.equal(highScoreSafe.riskScore, null);
+  assert.equal(highScoreSafe.suggestedReply, null);
+  assert.deepEqual(riskScoreAssessment({ isScam: false, confidenceScore: 92 }),
+    { score: null, conflictsWithVerdict: true });
 });
