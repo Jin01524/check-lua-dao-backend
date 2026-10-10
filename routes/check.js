@@ -3,10 +3,70 @@ import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
-import { recordScanInDB, sessionStats } from './stats.js';
+import { isActiveScanSession, recordScanInDB, reviseScanInDB, sessionStats } from './stats.js';
 import { saveScanTemplate } from '../services/templateStorage.js';
+import { assessContext } from '../lib/contextFlow.js';
+import { createHash } from 'node:crypto';
 
 const router = express.Router();
+export const v2Router = express.Router();
+const recentRequests = new Map();
+const REQUEST_TTL_MS = 10 * 60 * 1000;
+const MAX_RECENT_REQUESTS = 300;
+
+function requestFingerprint(req) {
+  const hash = createHash('sha256');
+  hash.update(JSON.stringify(req.body));
+  for (const file of req.files || []) {
+    hash.update(file.originalname || '');
+    hash.update(file.buffer);
+  }
+  return hash.digest('hex');
+}
+
+async function idempotentCheck(req, res, options) {
+  if (process.env.CONTEXT_FLOW_ENABLED === 'false') {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+  const id = String(req.body.clientRequestId || '').trim();
+  if (id && !/^[a-zA-Z0-9-]{8,80}$/.test(id)) {
+    return res.status(400).json({ error: 'Mã yêu cầu không hợp lệ.' });
+  }
+  if (!id) return handleCheck(req, res, options);
+  const now = Date.now();
+  for (const [key, entry] of recentRequests) {
+    if (now - entry.createdAt > REQUEST_TTL_MS) recentRequests.delete(key);
+  }
+  if (recentRequests.size >= MAX_RECENT_REQUESTS) {
+    const oldestCompleted = [...recentRequests].find(([, entry]) => entry.response);
+    if (oldestCompleted) recentRequests.delete(oldestCompleted[0]);
+  }
+  const fingerprint = requestFingerprint(req);
+  const prior = recentRequests.get(id);
+  if (prior) {
+    if (prior.fingerprint !== fingerprint) {
+      return res.status(409).json({ error: 'Mã yêu cầu đã được dùng cho nội dung khác.' });
+    }
+    if (!prior.response) return res.status(409).json({ error: 'Yêu cầu này đang được xử lý.' });
+    return res.json(prior.response);
+  }
+  recentRequests.set(id, { createdAt: now, fingerprint, response: null });
+  const sendJson = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      const entry = recentRequests.get(id);
+      if (entry) entry.response = body;
+    } else {
+      recentRequests.delete(id);
+    }
+    return sendJson(body);
+  };
+  try {
+    await handleCheck(req, res, options);
+  } finally {
+    if (!recentRequests.get(id)?.response) recentRequests.delete(id);
+  }
+}
 
 // ── Multer config: lưu trong memory, tối đa 5 files, mỗi file <= 10MB ────────
 const upload = multer({
@@ -33,13 +93,29 @@ const upload = multer({
  *   text     - Nội dung văn bản hoặc link nghi vấn đi kèm
  *   platform - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
  */
-router.post('/', upload.array('images', 5), async (req, res) => {
+async function handleCheck(req, res, { v2 = false, continuation = false } = {}) {
   const startedAt = performance.now();
   const supabase = getSupabaseClient();
 
   const files = req.files || [];
-  const textContent = (req.body.text || req.body.content || '').trim();
+  const originalText = String(req.body.originalText || '').trim();
+  const sentReply = String(req.body.sentReply || '').trim();
+  const senderReply = String(req.body.senderReply || req.body.text || '').trim();
+  const textContent = continuation
+    ? `[Tin nhắn ban đầu]\n${originalText}\n[Người dùng đã hỏi]\n${sentReply}\n[Phản hồi mới của người gửi]\n${senderReply}`
+    : String(req.body.text || req.body.content || '').trim();
   const platform = req.body.platform || 'SMS';
+  const round = continuation ? Number(req.body.round || 2) : 1;
+
+  if (v2 && (textContent.length > 24000 || originalText.length > 12000 || sentReply.length > 500 || senderReply.length > 12000)) {
+    return res.status(400).json({ error: 'Nội dung vượt quá giới hạn cho một phiên quét.' });
+  }
+  if (continuation && (!originalText || (!senderReply && files.length === 0) || ![2, 3].includes(round))) {
+    return res.status(400).json({ error: 'Thiếu tin ban đầu, phản hồi mới hoặc số vòng quét không hợp lệ.' });
+  }
+  if (continuation && !(await isActiveScanSession(String(req.body.scanSessionId || '')))) {
+    return res.status(410).json({ error: 'Phiên quét đã hết hạn hoặc không tồn tại. Hãy quét lại tin ban đầu.' });
+  }
 
   // Validate: Cần ít nhất 1 ảnh HOẶC 1 đoạn văn bản
   if (files.length === 0 && !textContent) {
@@ -156,6 +232,7 @@ router.post('/', upload.array('images', 5), async (req, res) => {
         apiKey: keyObj.key,
         fewShotExamples,
         safeExamples,
+        contextFlowEnabled: v2,
       });
       console.log(`[Check] Success using key: ${keyObj.label}`);
       break;
@@ -188,24 +265,47 @@ router.post('/', upload.array('images', 5), async (req, res) => {
     return res.status(500).json({ error: 'Phân tích thất bại. Vui lòng thử lại sau.' });
   }
   const analysisFinishedAt = performance.now();
-
+  const assessment = v2 ? assessContext({
+    analysisResult,
+    textContent: effectiveTextContent,
+    contextText: continuation ? `${originalText}\n${senderReply}\n${ocrExtractedText}` : effectiveTextContent,
+    round,
+  }) : null;
   // ── Lưu mẫu mới gồm ba phân tích AI ─────────────────────────────────────
   const numScore = Number(analysisResult.confidenceScore) || 0;
+  const modelDisagreement = v2 && assessment.status === 'high_risk'
+    && !analysisResult.isScam && numScore < 40;
   let templateSave = { id: null, status: 'database_error' };
-  try {
-    templateSave = await saveScanTemplate({ supabase, analysisResult, platform });
-  } catch (saveError) {
-    console.error('[Check] Could not save scan template:', saveError.message);
+  if (v2 && ['insufficient_context', 'invalid_input'].includes(assessment.status)) {
+    templateSave.status = 'deferred_insufficient_context';
+  } else if (modelDisagreement) {
+    templateSave.status = 'deferred_review';
+  } else {
+    try {
+      templateSave = await saveScanTemplate({ supabase, analysisResult, platform });
+    } catch (saveError) {
+      console.error('[Check] Could not save scan template:', saveError.message);
+    }
   }
 
   // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
+  let scanSessionId = continuation ? String(req.body.scanSessionId || '') : null;
   try {
-    await recordScanInDB({
-      platform,
-      isScam: Boolean(analysisResult.isScam),
-      confidenceScore: numScore,
-      scamType: analysisResult.scamType || null,
-    });
+    if (continuation) {
+      await reviseScanInDB({
+        scanId: scanSessionId,
+        isScam: assessment.status === 'high_risk',
+        confidenceScore: assessment.riskScore,
+        scamType: analysisResult.scamType || null,
+      });
+    } else {
+      scanSessionId = await recordScanInDB({
+        platform,
+        isScam: v2 ? assessment.status === 'high_risk' : Boolean(analysisResult.isScam),
+        confidenceScore: v2 ? assessment.riskScore : numScore,
+        scamType: analysisResult.scamType || null,
+      });
+    }
   } catch (statErr) {
     console.warn('[Check] Could not record scan stats:', statErr.message);
   }
@@ -213,14 +313,45 @@ router.post('/', upload.array('images', 5), async (req, res) => {
   console.log(`[Check] Timing: chuẩn bị/OCR ${Math.round(preparationFinishedAt - startedAt)}ms, AI ${Math.round(analysisFinishedAt - preparationFinishedAt)}ms, lưu ${Math.round(performance.now() - analysisFinishedAt)}ms`);
   res.json({
     ...analysisResult,
+    ...(modelDisagreement ? {
+      analysis: 'Nội dung có yêu cầu nhạy cảm, nhưng đánh giá AI chưa thống nhất. Không cung cấp thông tin, không thực hiện yêu cầu và hãy xác minh qua kênh chính thức.',
+      multiAgentDebate: null,
+      warningPoints: ['Có yêu cầu nhạy cảm cần xác minh độc lập.'],
+      recommendations: ['Không trả lời hoặc thực hiện yêu cầu trong cuộc chat này.', 'Tự tìm kênh chính thức để xác minh.'],
+    } : {}),
+    ...(v2 ? {
+      isScam: assessment.status === 'high_risk',
+      confidenceScore: assessment.riskScore,
+    } : {}),
     platform,
     imageCount: files.length,
     hasText: Boolean(textContent),
     savedTemplateId: templateSave.id,
     templateSaveStatus: templateSave.status,
+    ...(v2 ? {
+      scanSessionId,
+      assessment: {
+        status: assessment.status,
+        riskScore: assessment.riskScore,
+        reason: assessment.reason,
+      },
+      suggestedReply: assessment.suggestedReply,
+      allowedActions: assessment.allowedActions,
+      changedBecause: continuation
+        ? assessment.status === 'high_risk'
+          ? 'Phản hồi mới đã bộc lộ dấu hiệu rủi ro; kết quả được cập nhật từ trạng thái chưa đủ ngữ cảnh.'
+          : assessment.status === 'low_risk'
+            ? 'Sau khi thêm phản hồi mới, hệ thống có thêm bối cảnh để đánh giá.'
+            : 'Phản hồi mới vẫn chưa cung cấp đủ bối cảnh để kết luận.'
+        : null,
+    } : {}),
     ocrUsed,
     ocrExtractedText: ocrExtractedText || null,
   });
-});
+}
+
+router.post('/', upload.array('images', 5), (req, res) => handleCheck(req, res));
+v2Router.post('/', upload.array('images', 5), (req, res) => idempotentCheck(req, res, { v2: true }));
+v2Router.post('/continue', upload.array('images', 5), (req, res) => idempotentCheck(req, res, { v2: true, continuation: true }));
 
 export default router;

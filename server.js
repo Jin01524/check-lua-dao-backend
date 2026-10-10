@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import authRoutes from './routes/auth.js';
-import checkRoutes from './routes/check.js';
+import checkRoutes, { v2Router as checkV2Routes } from './routes/check.js';
 import templatesRoutes, { CURATED_TEMPLATES } from './routes/templates.js';
 import adminRoutes from './routes/admin.js';
 import statsRoutes from './routes/stats.js';
@@ -79,6 +79,7 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/check', checkRoutes);
+app.use('/api/v2/check', checkV2Routes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/stats', statsRoutes);

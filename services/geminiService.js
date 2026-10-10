@@ -87,6 +87,7 @@ export async function analyzeContent({
   apiKey,
   fewShotExamples = [],
   safeExamples = [],
+  contextFlowEnabled = false,
 }) {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -169,7 +170,7 @@ Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI log
 2. AI 2- NHẬN ĐỊNH AN TOÀN:
    - Đóng vai trò Devil's Advocate / Blue Team: Tìm kiếm các bằng chứng chứng minh tin nhắn có thể là hợp lệ, ngăn chặn BÁO ĐỘNG GIẢ (False Positive).
    - KIỂM ĐỊNH MA TRẬN KÊNH CHIẾM ĐOẠT (EXFILTRATION VECTOR MATRIX):
-     Để một vụ lừa đảo trực tuyến chiếm đoạt tài sản xảy ra, kẻ gian BẮT BUỘC phải cung cấp Kênh Chiếm Đoạt từ xa (Exfiltration Vector). Chọn chính xác 1 trong các giá trị sau:
+     Xem kênh chiếm đoạt từ xa là một dấu hiệu mạnh khi có, nhưng không được coi việc chưa thấy kênh này trong đoạn ngắn là bằng chứng an toàn. Chọn chính xác 1 trong các giá trị sau:
      * "none": KHÔNG CÓ KÊNH CHIẾM ĐOẠT TỪ XA. (Ví dụ: Thông báo hướng dẫn khách hàng đến quầy giao dịch vật lý, nhắc nhở định kỳ không kèm link/yêu cầu tiền).
      * "phishing_link": Chứa liên kết, website, tên miền lạ hoặc rút gọn để lừa đăng nhập/đánh cắp thông tin.
      * "otp_theft": Yêu cầu cung cấp mã OTP, mã xác thực Smart OTP, mật khẩu, thông tin thẻ/tài khoản.
@@ -177,14 +178,11 @@ Hệ thống vận hành thông qua sự phản biện giữa 3 tác tử AI log
      * "apk_malware": Dụ dỗ cài đặt ứng dụng ngoài (file .apk), dịch vụ công giả mạo, quét mã QR cài mã độc.
      * "unauthorized_contact": Yêu cầu gọi vào số hotline lạ hoặc kết bạn Zalo/Telegram cá nhân không chính thức.
 
-   - NGUYÊN TẮC VÀNG VỀ QUẦY GIAO DỊCH VẬT LÝ (PHYSICAL COUNTER AXIOM):
-     * Kẻ lừa đảo KHÔNG BAO GIỜ yêu cầu nạn nhân mang giấy tờ đến trực tiếp quầy giao dịch/phòng giao dịch ngân hàng hoặc trụ sở công an để làm việc mà KHÔNG kèm bất kỳ liên kết, số điện thoại lạ, đòi chuyển tiền hay OTP nào.
-     * Nếu tin nhắn chỉ mang tính chất thông báo: Yêu cầu khách hàng đến trực tiếp chi nhánh/phòng giao dịch ngân hàng (ví dụ: MB Bank, Vietcombank, Techcombank...) để tra soát giao dịch bất thường hoặc cập nhật sinh trắc học mà KHÔNG có link lạ, KHÔNG đòi OTP, KHÔNG đòi chuyển tiền -> ĐÂY LÀ NGHIỆP VỤ BÌNH THƯỜNG CỦA NGÂN HÀNG (AN TOÀN TUYỆT ĐỐI).
-     * BẮT BUỘC: Khi exfiltrationVector là "none" và nội dung hướng dẫn ra quầy vật lý, confidenceScore PHẢI nằm trong khoảng 0 - 15%, isScam = false! Tuyệt đối không được gán nhãn lừa đảo chỉ vì có từ khóa "Ngân hàng", "giao dịch bất thường" hay "tra soát".
+   - Nếu tin nhắn chỉ hướng dẫn đến quầy giao dịch vật lý, không có yêu cầu nhạy cảm khác, đó là bằng chứng giảm rủi ro nhưng KHÔNG xác minh được danh tính người gửi. Nếu thiếu đoạn trước/sau, ghi rõ giới hạn ngữ cảnh. Không dùng các từ "an toàn tuyệt đối" hoặc ép một điểm rủi ro thấp cố định.
 
 3. AI 3 - KẾT LUẬN:
    - Cân nhắc lập luận giữa Hunter và Auditor.
-   - Nếu Hunter cảnh báo từ khóa nhưng Auditor chứng minh không có kênh chiếm đoạt ("none") và hướng dẫn ra quầy vật lý -> Phán quyết: AN TOÀN (Gỡ cảnh báo sai lệch).
+   - Nếu Hunter chỉ cảnh báo từ khóa còn Auditor chưa thấy kênh chiếm đoạt, cân nhắc nội dung đầy đủ; nếu đoạn ngắn hoặc danh tính/kịch bản chưa rõ, nói chưa đủ ngữ cảnh thay vì xác nhận an toàn.
    - Nếu có Kênh Chiếm Đoạt rõ ràng -> Phán quyết: LỪA ĐẢO / RỦI RO CAO.
 
 ======================================================================
@@ -205,6 +203,8 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   "title": "Tiêu đề hồ sơ thẩm định",
   "attackTarget": "Mục tiêu tấn công (hoặc 'Không có' nếu an toàn)",
   "confidenceScore": 5,
+  "contextSufficiency": "sufficient hoặc insufficient",
+  "suggestedReply": "Bạn muốn trao đổi cụ thể về việc gì vậy?",
   "exfiltrationVector": "none",
   "multiAgentDebate": {
     "threatHunterAnalysis": "Nhận định ngắn gọn của Tác tử Săn tìm Rủi ro về từ khóa và ngữ cảnh",
@@ -221,7 +221,8 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
   "messages": [
     {"sender": "Tên người gửi", "text": "Nội dung tin nhắn đã khử nhạy cảm"}
   ]
-}`;
+}
+${contextFlowEnabled ? `Nếu chỉ có một câu ngắn, thiếu mục đích/người gửi và không có yêu cầu nhạy cảm rõ, đặt contextSufficiency="insufficient". Câu suggestedReply phải hỏi đúng điều còn thiếu, không suy đoán câu trả lời. Nếu có yêu cầu OTP, chuyển tiền, cài APK, liên kết đáng ngờ hoặc đe dọa, không tạo suggestedReply. Phản hồi mới của người gửi vẫn là lời tự khai, không chứng minh danh tính.` : ''}`;
 
   // ── Call Gemini API (Flash models 2.5 - 3.5, ưu tiên activeGeminiModel và 3.5 Flash trước) ──
   const active = getActiveGeminiModel();
@@ -294,7 +295,9 @@ TRẢ VỀ DUY NHẤT MỘT JSON OBJECT HỢP LỆ, KHÔNG CHỨA BẤT KỲ VĂ
       scamType: parsed.scamType || null,
       title: parsed.title || null,
       attackTarget: (parsed.attackTarget && String(parsed.attackTarget).trim()) || 'Không rõ',
-      confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0,
+      confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : (contextFlowEnabled ? null : 0),
+      contextSufficiency: parsed.contextSufficiency === 'insufficient' ? 'insufficient' : 'sufficient',
+      suggestedReply: typeof parsed.suggestedReply === 'string' ? parsed.suggestedReply : null,
       exfiltrationVector,
       multiAgentDebate,
       analysis: parsed.isChatScreenshot === false
