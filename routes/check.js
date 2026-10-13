@@ -3,7 +3,7 @@ import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
-import { isActiveScanSession, recordScanInDB, reviseScanInDB, sessionStats } from './stats.js';
+import { createPendingScanSession, isActiveScanSession, recordScanInDB, reviseScanInDB, sessionStats } from './stats.js';
 import { saveScanTemplate } from '../services/templateStorage.js';
 import { assessContext, riskScoreAssessment } from '../lib/contextFlow.js';
 import { createHash } from 'node:crypto';
@@ -289,10 +289,14 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
 
   // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
   let scanSessionId = continuation ? String(req.body.scanSessionId || '') : null;
+  const hasVerdict = !v2 || ['high_risk', 'low_risk'].includes(assessment.status);
   try {
-    if (continuation) {
+    if (!hasVerdict) {
+      scanSessionId ||= createPendingScanSession();
+    } else if (continuation) {
       await reviseScanInDB({
         scanId: scanSessionId,
+        platform,
         isScam: assessment.status === 'high_risk',
         confidenceScore: assessment.riskScore,
         scamType: analysisResult.scamType || null,
