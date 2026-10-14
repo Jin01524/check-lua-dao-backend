@@ -315,7 +315,7 @@ ${contextFlowEnabled ? `Nếu chỉ có một câu ngắn, thiếu mục đích/
       messages: Array.isArray(parsed.messages) ? parsed.messages : [],
     };
   } catch (parseError) {
-    console.error('[GeminiService] Failed to parse JSON from AI response:', rawText);
+    console.error('[GeminiService] Failed to parse AI response JSON; raw content omitted.');
     throw new Error('Dữ liệu phân tích từ AI không đúng định dạng JSON chuẩn');
   }
 }

@@ -67,7 +67,7 @@ Server sẽ chạy tại: `http://localhost:5000`
 | `POST` | `/api/auth/login` | Đăng nhập admin |
 | `POST` | `/api/check` | OCR ảnh cục bộ rồi phân tích văn bản (multipart) |
 | `POST` | `/api/v2/check` | Quét có trạng thái `high_risk`, `low_risk`, `insufficient_context`, `invalid_input` |
-| `POST` | `/api/v2/check/continue` | Phân tích tiếp cùng một phiên khi có phản hồi mới |
+| `POST` | `/api/v2/check/continue` | Tương thích client cũ; xử lý nội dung gửi lên như một lượt quét mới |
 | `GET`  | `/api/templates` | Danh sách mẫu đã và chưa kiểm duyệt, có `is_approved` |
 | `GET`  | `/api/templates/:id` | Chi tiết mẫu đã và chưa kiểm duyệt |
 
@@ -87,7 +87,7 @@ Server sẽ chạy tại: `http://localhost:5000`
 
 ## Hỏi thêm để kiểm tra tin nhắn ngắn
 
-Client mới gửi `multipart/form-data` đến `/api/v2/check` với `text` hoặc `images`, `platform` và `clientRequestId` ngẫu nhiên. Khi `assessment.status=insufficient_context`, phản hồi có `scanSessionId`, `riskScore=null`, `suggestedReply` và `allowedActions`. Người dùng tự quyết định sao chép/gửi câu hỏi. Client giữ tin gốc trong bộ nhớ và gọi `/api/v2/check/continue` với `scanSessionId`, `originalText`, `sentReply`, `senderReply` hoặc ảnh mới, `round` (2 hoặc 3) và `clientRequestId` mới. Phiên chưa có kết luận không ghi `scan_logs` và không tính vào thống kê. Mã phiên được ký bằng `JWT_SECRET` (hoặc khóa dịch vụ Supabase) để tiếp tục được sau khi backend khởi động lại; hiệu lực tối đa một giờ. Khi kết luận là `high_risk` hoặc `low_risk`, backend mới ghi metadata vào `scan_logs`; mẫu chưa đủ ngữ cảnh không được đưa vào kho mẫu. Nếu không cấu hình khóa ký, phiên chỉ tồn tại trong bộ nhớ tiến trình.
+Client gửi `multipart/form-data` đến `/api/v2/check` với `text` hoặc `images`, `platform` và `clientRequestId` ngẫu nhiên cho mỗi lượt mới. Khi `assessment.status=insufficient_context` hoặc `invalid_input`, backend trả `scanSessionId=null`, không tạo phiên chờ, không ghi `scan_logs`, không lưu mẫu và không giữ phản hồi trong cache yêu cầu. Người dùng có thể sao chép câu hỏi AI và tự gửi; khi có phản hồi, họ gửi lại toàn bộ đoạn hội thoại như một lượt mới. Chỉ kết luận `high_risk` hoặc `low_risk` mới được ghi metadata và tính thống kê. Quy tắc không lưu lượt thiếu ngữ cảnh cũng áp dụng cho `/api/check` cũ. `/api/v2/check/continue` được giữ để client cũ không lỗi, nhưng không tra mã phiên hay cập nhật lượt cũ; nó phân tích dữ liệu được gửi trong yêu cầu và tạo lượt mới khi có kết luận.
 
 Nếu cần tắt nhanh API v2, đặt `CONTEXT_FLOW_ENABLED=false` và khởi động lại backend. Client mới sẽ quay về `/api/check` khi `/api/v2/check` trả 404. Bộ nhớ chống gửi trùng dùng `clientRequestId` trong 10 phút trên một tiến trình; client phải giữ cùng ID khi thử lại cùng nội dung.
 

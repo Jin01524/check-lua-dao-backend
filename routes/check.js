@@ -3,9 +3,8 @@ import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
-import { createPendingScanSession, isActiveScanSession, recordScanInDB, reviseScanInDB, sessionStats } from './stats.js';
-import { saveScanTemplate } from '../services/templateStorage.js';
-import { assessContext, riskScoreAssessment } from '../lib/contextFlow.js';
+import { assessContext } from '../lib/contextFlow.js';
+import { hasConclusiveAssessment, persistScanOutcome } from '../services/scanPersistence.js';
 import { createHash } from 'node:crypto';
 
 const router = express.Router();
@@ -53,7 +52,7 @@ async function idempotentCheck(req, res, options) {
   recentRequests.set(id, { createdAt: now, fingerprint, response: null });
   const sendJson = res.json.bind(res);
   res.json = (body) => {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
+    if (res.statusCode >= 200 && res.statusCode < 300 && hasConclusiveAssessment(body.assessment)) {
       const entry = recentRequests.get(id);
       if (entry) entry.response = body;
     } else {
@@ -105,16 +104,14 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
     ? `[Tin nhắn ban đầu]\n${originalText}\n[Người dùng đã hỏi]\n${sentReply}\n[Phản hồi mới của người gửi]\n${senderReply}`
     : String(req.body.text || req.body.content || '').trim();
   const platform = req.body.platform || 'SMS';
-  const round = continuation ? Number(req.body.round || 2) : 1;
+  // /continue remains compatible with old clients, but every request is a new scan.
+  const round = 1;
 
   if (v2 && (textContent.length > 24000 || originalText.length > 12000 || sentReply.length > 500 || senderReply.length > 12000)) {
     return res.status(400).json({ error: 'Nội dung vượt quá giới hạn cho một phiên quét.' });
   }
-  if (continuation && (!originalText || (!senderReply && files.length === 0) || ![2, 3].includes(round))) {
-    return res.status(400).json({ error: 'Thiếu tin ban đầu, phản hồi mới hoặc số vòng quét không hợp lệ.' });
-  }
-  if (continuation && !(await isActiveScanSession(String(req.body.scanSessionId || '')))) {
-    return res.status(410).json({ error: 'Phiên quét đã hết hạn hoặc không tồn tại. Hãy quét lại tin ban đầu.' });
+  if (continuation && (!originalText || (!senderReply && files.length === 0))) {
+    return res.status(400).json({ error: 'Hãy cung cấp đoạn hội thoại để bắt đầu lượt kiểm tra mới.' });
   }
 
   // Validate: Cần ít nhất 1 ảnh HOẶC 1 đoạn văn bản
@@ -265,53 +262,16 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
     return res.status(500).json({ error: 'Phân tích thất bại. Vui lòng thử lại sau.' });
   }
   const analysisFinishedAt = performance.now();
-  const assessment = v2 ? assessContext({
+  const assessment = assessContext({
     analysisResult,
     textContent: effectiveTextContent,
     contextText: continuation ? `${originalText}\n${senderReply}\n${ocrExtractedText}` : effectiveTextContent,
     round,
-  }) : null;
-  // ── Lưu mẫu mới gồm ba phân tích AI ─────────────────────────────────────
-  const { score: riskScore, conflictsWithVerdict } = riskScoreAssessment(analysisResult);
-  const modelDisagreement = v2 && assessment.status === 'high_risk' && !analysisResult.isScam;
-  let templateSave = { id: null, status: 'database_error' };
-  if (modelDisagreement || conflictsWithVerdict) {
-    templateSave.status = 'deferred_review';
-  } else if (v2 && ['insufficient_context', 'invalid_input'].includes(assessment.status)) {
-    templateSave.status = 'deferred_insufficient_context';
-  } else {
-    try {
-      templateSave = await saveScanTemplate({ supabase, analysisResult, platform });
-    } catch (saveError) {
-      console.error('[Check] Could not save scan template:', saveError.message);
-    }
-  }
-
-  // Giữ thống kê hoàn tất trước khi trả kết quả để số liệu giao diện cập nhật ngay.
-  let scanSessionId = continuation ? String(req.body.scanSessionId || '') : null;
-  const hasVerdict = !v2 || ['high_risk', 'low_risk'].includes(assessment.status);
-  try {
-    if (!hasVerdict) {
-      scanSessionId ||= createPendingScanSession();
-    } else if (continuation) {
-      await reviseScanInDB({
-        scanId: scanSessionId,
-        platform,
-        isScam: assessment.status === 'high_risk',
-        confidenceScore: assessment.riskScore,
-        scamType: analysisResult.scamType || null,
-      });
-    } else {
-      scanSessionId = await recordScanInDB({
-        platform,
-        isScam: v2 ? assessment.status === 'high_risk' : Boolean(analysisResult.isScam),
-        confidenceScore: v2 ? assessment.riskScore : riskScore,
-        scamType: analysisResult.scamType || null,
-      });
-    }
-  } catch (statErr) {
-    console.warn('[Check] Could not record scan stats:', statErr.message);
-  }
+  });
+  const modelDisagreement = assessment.status === 'high_risk' && !analysisResult.isScam;
+  const { scanSessionId, templateSave } = await persistScanOutcome({
+    assessment, analysisResult, platform, supabase,
+  });
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   console.log(`[Check] Timing: chuẩn bị/OCR ${Math.round(preparationFinishedAt - startedAt)}ms, AI ${Math.round(analysisFinishedAt - preparationFinishedAt)}ms, lưu ${Math.round(performance.now() - analysisFinishedAt)}ms`);
   res.json({
@@ -322,33 +282,22 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
       warningPoints: ['Có yêu cầu nhạy cảm cần xác minh độc lập.'],
       recommendations: ['Không trả lời hoặc thực hiện yêu cầu trong cuộc chat này.', 'Tự tìm kênh chính thức để xác minh.'],
     } : {}),
-    ...(!v2 ? { confidenceScore: riskScore } : {}),
-    ...(v2 ? {
-      isScam: assessment.status === 'high_risk',
-      confidenceScore: assessment.riskScore,
-    } : {}),
+    isScam: assessment.status === 'high_risk',
+    confidenceScore: assessment.riskScore,
     platform,
     imageCount: files.length,
     hasText: Boolean(textContent),
     savedTemplateId: templateSave.id,
     templateSaveStatus: templateSave.status,
-    ...(v2 ? {
-      scanSessionId,
-      assessment: {
-        status: assessment.status,
-        riskScore: assessment.riskScore,
-        reason: assessment.reason,
-      },
-      suggestedReply: assessment.suggestedReply,
-      allowedActions: assessment.allowedActions,
-      changedBecause: continuation
-        ? assessment.status === 'high_risk'
-          ? 'Phản hồi mới đã bộc lộ dấu hiệu rủi ro; kết quả được cập nhật từ trạng thái chưa đủ ngữ cảnh.'
-          : assessment.status === 'low_risk'
-            ? 'Sau khi thêm phản hồi mới, hệ thống có thêm bối cảnh để đánh giá.'
-            : 'Phản hồi mới vẫn chưa cung cấp đủ bối cảnh để kết luận.'
-        : null,
-    } : {}),
+    scanSessionId,
+    assessment: {
+      status: assessment.status,
+      riskScore: assessment.riskScore,
+      reason: assessment.reason,
+    },
+    suggestedReply: assessment.suggestedReply,
+    allowedActions: assessment.allowedActions,
+    changedBecause: null,
     ocrUsed,
     ocrExtractedText: ocrExtractedText || null,
   });
