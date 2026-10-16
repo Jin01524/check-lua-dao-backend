@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
+import { abortable } from '../lib/scanCancellation.js';
 
 /**
  * Danh sách model Gemini Flash được hỗ trợ từ 2.5 Flash đến 3.5 Flash (KHÔNG dùng dòng Lite)
@@ -88,7 +89,9 @@ export async function analyzeContent({
   fewShotExamples = [],
   safeExamples = [],
   contextFlowEnabled = false,
+  signal,
 }) {
+  signal?.throwIfAborted();
   const ai = new GoogleGenAI({ apiKey });
 
   // ── Build few-shot examples section (mẫu lừa đảo đối chiếu) ────────────────
@@ -242,10 +245,12 @@ ${contextFlowEnabled ? `Nếu chỉ có một câu ngắn, thiếu mục đích/
   let response = null;
 
   for (const modelName of modelsToTry) {
+    signal?.throwIfAborted();
     try {
-      response = await ai.models.generateContent({
+      response = await abortable(ai.models.generateContent({
         model: modelName,
         config: {
+          abortSignal: signal,
           responseMimeType: 'application/json',
           thinkingConfig: modelName.startsWith('gemini-2.5-')
             ? { thinkingBudget: needsDeeperReasoning ? 2048 : 1024 }
@@ -257,12 +262,14 @@ ${contextFlowEnabled ? `Nếu chỉ có một câu ngắn, thiếu mục đích/
             parts: [{ text: prompt }],
           },
         ],
-      });
+      }), signal);
+      signal?.throwIfAborted();
       if (response && response.text) {
         modelUnavailableUntil.delete(modelName);
         break;
       }
     } catch (err) {
+      signal?.throwIfAborted();
       lastModelError = err;
       console.warn(`[GeminiService] Model ${modelName} failed, trying next:`, err.message);
       if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(err.message)) throw err;

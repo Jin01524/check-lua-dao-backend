@@ -2,7 +2,8 @@ import { completeMultiAgentDebate } from '../lib/multiAgentDebate.js';
 import { redactTemplateValue } from '../lib/redactTemplate.js';
 import { riskScoreAssessment } from '../lib/contextFlow.js';
 
-export async function saveScanTemplate({ supabase, analysisResult, platform, logger = console }) {
+export async function saveScanTemplate({ supabase, analysisResult, platform, logger = console, signal }) {
+  signal?.throwIfAborted();
   if (analysisResult.isChatScreenshot === false) {
     return { id: null, status: 'not_applicable' };
   }
@@ -35,11 +36,14 @@ export async function saveScanTemplate({ supabase, analysisResult, platform, log
     multi_agent_debate: debate,
   });
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('scam_templates')
     .insert(template)
     .select('id')
     .single();
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
+  signal?.throwIfAborted();
 
   if (error || !data?.id) {
     logger.error('[Check] Failed to save template:', error?.message || 'No id returned');

@@ -6,6 +6,7 @@ import { extractTextFromImages } from '../services/ocrService.js';
 import { assessContext } from '../lib/contextFlow.js';
 import { hasConclusiveAssessment, persistScanOutcome } from '../services/scanPersistence.js';
 import { createHash } from 'node:crypto';
+import { abortable, withScanCancellation } from '../lib/scanCancellation.js';
 
 const router = express.Router();
 export const v2Router = express.Router();
@@ -52,7 +53,7 @@ async function idempotentCheck(req, res, options) {
   recentRequests.set(id, { createdAt: now, fingerprint, response: null });
   const sendJson = res.json.bind(res);
   res.json = (body) => {
-    if (res.statusCode >= 200 && res.statusCode < 300 && hasConclusiveAssessment(body.assessment)) {
+    if (!res.destroyed && res.statusCode >= 200 && res.statusCode < 300 && hasConclusiveAssessment(body.assessment)) {
       const entry = recentRequests.get(id);
       if (entry) entry.response = body;
     } else {
@@ -92,7 +93,8 @@ const upload = multer({
  *   text     - Nội dung văn bản hoặc link nghi vấn đi kèm
  *   platform - Tên nền tảng (Zalo, Facebook, SMS, Telegram, v.v.)
  */
-async function handleCheck(req, res, { v2 = false, continuation = false } = {}) {
+async function handleCheck(req, res, { v2 = false, continuation = false, signal } = {}) {
+  signal?.throwIfAborted();
   const startedAt = performance.now();
   const supabase = getSupabaseClient();
 
@@ -129,7 +131,8 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
       .ilike('platform', `%${platform}%`)
-      .limit(2);
+      .limit(2).abortSignal(signal);
+    signal?.throwIfAborted();
     if (!same.error && same.data?.length) return same.data;
 
     const any = await supabase.from('scam_templates')
@@ -137,21 +140,22 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
       .gte('confidence_score', 40)
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
-      .limit(2);
+      .limit(2).abortSignal(signal);
     if (any.error) throw any.error;
     return any.data || [];
   })();
 
-  const [keyResult, scamResult, safeResult, ocrResult] = await Promise.allSettled([
-    supabase.from('api_keys').select('id, key, label, is_active'),
+  const [keyResult, scamResult, safeResult, ocrResult] = await abortable(Promise.allSettled([
+    supabase.from('api_keys').select('id, key, label, is_active').abortSignal(signal),
     scamExamplesPromise,
     supabase.from('scam_templates')
       .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
       .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
-      .limit(2),
-    files.length > 0 ? extractTextFromImages(files) : Promise.resolve(''),
-  ]);
+      .limit(2).abortSignal(signal),
+    files.length > 0 ? extractTextFromImages(files, { signal }) : Promise.resolve(''),
+  ]), signal);
+  signal?.throwIfAborted();
 
   if (ocrResult.status === 'rejected') {
     console.error('[Check] Local OCR failed:', ocrResult.reason);
@@ -220,6 +224,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
   let lastError = null;
 
   for (const keyObj of shuffledKeys) {
+    signal?.throwIfAborted();
     try {
       console.log(`[Check] Attempting analysis with key: ${keyObj.label} (${keyObj.id})`);
       analysisResult = await analyzeContent({
@@ -230,10 +235,13 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
         fewShotExamples,
         safeExamples,
         contextFlowEnabled: v2,
+        signal,
       });
+      signal?.throwIfAborted();
       console.log(`[Check] Success using key: ${keyObj.label}`);
       break;
     } catch (err) {
+      signal?.throwIfAborted();
       lastError = err;
       console.error(`[Check] Error with key "${keyObj.label}" (${keyObj.id}):`, err.message);
 
@@ -270,8 +278,9 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
   });
   const modelDisagreement = assessment.status === 'high_risk' && !analysisResult.isScam;
   const { scanSessionId, templateSave } = await persistScanOutcome({
-    assessment, analysisResult, platform, supabase,
+    assessment, analysisResult, platform, supabase, signal,
   });
+  signal?.throwIfAborted();
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   console.log(`[Check] Timing: chuẩn bị/OCR ${Math.round(preparationFinishedAt - startedAt)}ms, AI ${Math.round(analysisFinishedAt - preparationFinishedAt)}ms, lưu ${Math.round(performance.now() - analysisFinishedAt)}ms`);
   res.json({
@@ -303,8 +312,11 @@ async function handleCheck(req, res, { v2 = false, continuation = false } = {}) 
   });
 }
 
-router.post('/', upload.array('images', 5), (req, res) => handleCheck(req, res));
-v2Router.post('/', upload.array('images', 5), (req, res) => idempotentCheck(req, res, { v2: true }));
-v2Router.post('/continue', upload.array('images', 5), (req, res) => idempotentCheck(req, res, { v2: true, continuation: true }));
+router.post('/', upload.array('images', 5), (req, res) =>
+  withScanCancellation(req, res, signal => handleCheck(req, res, { signal })));
+v2Router.post('/', upload.array('images', 5), (req, res) =>
+  withScanCancellation(req, res, signal => idempotentCheck(req, res, { v2: true, signal })));
+v2Router.post('/continue', upload.array('images', 5), (req, res) =>
+  withScanCancellation(req, res, signal => idempotentCheck(req, res, { v2: true, continuation: true, signal })));
 
 export default router;
