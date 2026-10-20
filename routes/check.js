@@ -3,7 +3,7 @@ import multer from 'multer';
 import { getSupabaseClient } from '../lib/supabase.js';
 import { analyzeContent } from '../services/geminiService.js';
 import { extractTextFromImages } from '../services/ocrService.js';
-import { assessContext } from '../lib/contextFlow.js';
+import { assessContext, publicAnalysis } from '../lib/contextFlow.js';
 import { hasConclusiveAssessment, persistScanOutcome } from '../services/scanPersistence.js';
 import { createHash } from 'node:crypto';
 import { abortable, withScanCancellation } from '../lib/scanCancellation.js';
@@ -131,6 +131,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
       .ilike('platform', `%${platform}%`)
+      .order('id', { ascending: true })
       .limit(2).abortSignal(signal);
     signal?.throwIfAborted();
     if (!same.error && same.data?.length) return same.data;
@@ -140,6 +141,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
       .gte('confidence_score', 40)
       .neq('scam_type', 'Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
+      .order('id', { ascending: true })
       .limit(2).abortSignal(signal);
     if (any.error) throw any.error;
     return any.data || [];
@@ -152,6 +154,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
       .select('id, title, platform, scam_type, analysis, messages_json, confidence_score')
       .or('confidence_score.lt.40,scam_type.eq.Tin nhắn an toàn / Bình thường')
       .eq('is_approved', true)
+      .order('id', { ascending: true })
       .limit(2).abortSignal(signal),
     files.length > 0 ? extractTextFromImages(files, { signal }) : Promise.resolve(''),
   ]), signal);
@@ -246,13 +249,9 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
       console.error(`[Check] Error with key "${keyObj.label}" (${keyObj.id}):`, err.message);
 
       // Tự động tắt key nếu bị vô hiệu vĩnh viễn
-      const isPermanentError =
-        err.status === 403 ||
-        err.status === 400 ||
-        err.message.includes('API key') ||
-        err.message.includes('API_KEY') ||
-        err.message.includes('PERMISSION_DENIED') ||
-        err.message.includes('invalid');
+      // A schema/model/parameter error must never disable a working API key.
+      const isPermanentError = /API_KEY_(?:INVALID|EXPIRED|REVOKED)|API key (?:not valid|expired|has expired)/i
+        .test(String(err.message || ''));
 
       if (isPermanentError && keyObj.id !== 'fallback') {
         console.warn(`[Check] Disabling invalid key "${keyObj.label}" in DB.`);
@@ -284,7 +283,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
   // ── Trả về kết quả cho Frontend ──────────────────────────────────────────
   console.log(`[Check] Timing: chuẩn bị/OCR ${Math.round(preparationFinishedAt - startedAt)}ms, AI ${Math.round(analysisFinishedAt - preparationFinishedAt)}ms, lưu ${Math.round(performance.now() - analysisFinishedAt)}ms`);
   res.json({
-    ...analysisResult,
+    ...publicAnalysis(analysisResult, assessment),
     ...(modelDisagreement ? {
       analysis: 'Nội dung có yêu cầu nhạy cảm, nhưng đánh giá AI chưa thống nhất. Không cung cấp thông tin, không thực hiện yêu cầu và hãy xác minh qua kênh chính thức.',
       multiAgentDebate: null,
