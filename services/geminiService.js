@@ -89,13 +89,14 @@ export async function analyzeContent({
   apiKey,
   fewShotExamples = [],
   safeExamples = [],
+  hasTypedText = imageCount === 0 && Boolean(textContent.trim()),
   signal,
 }) {
   signal?.throwIfAborted();
   const ai = new GoogleGenAI({ apiKey });
 
   const prompt = buildAnalysisPrompt({
-    textContent, platform, imageCount, fewShotExamples, safeExamples,
+    textContent, platform, imageCount, fewShotExamples, safeExamples, hasTypedText,
   });
 
   // ── Call Gemini API (Flash models 2.5 - 3.5, ưu tiên activeGeminiModel và 3.5 Flash trước) ──
@@ -175,9 +176,11 @@ export async function analyzeContent({
       : (parsed.isScam ? 'phishing_link' : 'none');
 
     const multiAgentDebate = completeMultiAgentDebate(parsed.multiAgentDebate);
+    // The legacy field name must not turn readable typed messages into image errors.
+    const isChatScreenshot = hasTypedText || parsed.isChatScreenshot;
 
     return {
-      isChatScreenshot: parsed.isChatScreenshot ?? true,
+      isChatScreenshot,
       isScam: parsed.isScam,
       scamType: parsed.scamType || null,
       title: parsed.title || null,
@@ -192,7 +195,7 @@ export async function analyzeContent({
       suggestedReply: typeof parsed.suggestedReply === 'string' ? parsed.suggestedReply : null,
       exfiltrationVector,
       multiAgentDebate,
-      analysis: parsed.isChatScreenshot === false
+      analysis: isChatScreenshot === false
         ? (parsed.analysis || 'Không tìm thấy nội dung tin nhắn cần kiểm tra. Vui lòng chụp lại màn hình rõ ràng hơn.')
         : (multiAgentDebate?.arbiterVerdict || parsed.analysis || ''),
       warningPoints: Array.isArray(parsed.warningPoints) ? parsed.warningPoints : [],

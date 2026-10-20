@@ -12,6 +12,7 @@ test('input and reference examples stay in a bounded data payload, separate from
   assert.equal(prompt.systemInstruction.includes(injection), false);
   const data = JSON.parse(prompt.contents);
   assert.equal(data.input.text, injection);
+  assert.equal(data.input.kind, 'message_text');
   assert.equal(data.policyVersion, ANALYSIS_POLICY_VERSION);
   assert.equal(data.referenceExamples[0].analysis, 'a');
   assert.equal(data.referenceExamples[1].analysis.length, 600);
@@ -49,4 +50,20 @@ test('a string false cannot silently become a true scam verdict', async t => {
     finishReason: 'STOP',
   }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   await assert.rejects(analyzeContent({ textContent: 'Test only', apiKey: 'test-only' }), /không đúng định dạng/);
+});
+
+test('typed text cannot be labelled an invalid screenshot; real OCR-only failures remain invalid', async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => new Response(JSON.stringify({ candidates: [{
+    content: { parts: [{ text: JSON.stringify({
+      isChatScreenshot: false, isScam: false, confidenceScore: 5, contextSufficiency: 'sufficient',
+      multiAgentDebate: { threatHunterAnalysis: 'Không có yêu cầu nhạy cảm.', auditorDefense: 'Nội dung hẹn họp rõ ràng.', arbiterVerdict: 'Chưa thấy dấu hiệu rủi ro.' },
+    }) }] }, finishReason: 'STOP',
+  }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const typed = await analyzeContent({ textContent: 'Mai họp nhóm lúc 8h ở thư viện nhé.', apiKey: 'test-only' });
+  assert.equal(typed.isChatScreenshot, true);
+  assert.equal(typed.analysis, 'Chưa thấy dấu hiệu rủi ro.');
+  const ocr = await analyzeContent({ textContent: 'Menu 100% 123', imageCount: 1, hasTypedText: false, apiKey: 'test-only' });
+  assert.equal(ocr.isChatScreenshot, false);
 });

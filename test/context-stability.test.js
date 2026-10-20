@@ -126,6 +126,10 @@ test('unknown short danger is not suppressed just to make outcomes consistent', 
   }
   const invalid = assessContext({ analysisResult: { ...model, isChatScreenshot: false }, textContent: 'Brightness Settings Menu' });
   assert.equal(invalid.status, 'invalid_input');
+  const falseImageFlag = { ...model, isChatScreenshot: false, isScam: true, confidenceScore: 90 };
+  const clearOtp = assessContext({ analysisResult: falseImageFlag, textContent: 'Gửi mã OTP cho tôi ngay.' });
+  assert.equal(clearOtp.status, 'high_risk');
+  assert.equal(publicAnalysis(falseImageFlag, clearOtp).isChatScreenshot, true);
 });
 
 test('reply validation rejects instructional, accusatory and sensitive requests', () => {

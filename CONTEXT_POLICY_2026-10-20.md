@@ -1,6 +1,6 @@
 # Chính sách nhận định thiếu ngữ cảnh — 20/10/2026
 
-Phiên bản prompt: `context-2026-10-20`. Áp dụng tại backend chung cho app, overlay và web; giữ định dạng API hiện có.
+Phiên bản prompt: `context-2026-10-20.1`. Áp dụng tại backend chung cho app, overlay và web; giữ định dạng API hiện có.
 
 ## Nguyên nhân được xử lý
 
@@ -17,12 +17,13 @@ Phiên bản prompt: `context-2026-10-20`. Áp dụng tại backend chung cho ap
 5. Gợi ý hỏi đúng một điều chưa biết. Đã nói tên thì hỏi mục đích; chưa có vai trò tuyển dụng thì hỏi vị trí; đã có vị trí nhưng chưa rõ đơn vị thì hỏi công ty. Câu hỏi không xin bí mật xác thực, hồ sơ cá nhân hay gợi ý làm theo yêu cầu nguy hiểm.
 6. Prompt dùng system instruction riêng, nội dung/OCR/ví dụ nằm trong JSON dữ liệu. Schema quy định boolean, điểm nguyên hoặc null, trạng thái sufficient/insufficient và ba phần phân tích.
 7. Chọn ví dụ theo thứ tự id ổn định, giới hạn độ dài. API trả thêm `analysisModel` và `analysisPolicyVersion` để truy vết thay đổi mô hình/prompt.
+8. `isChatScreenshot` là tên cờ tương thích cũ, biểu thị có nội dung đọc được cho cả text và ảnh. Văn bản nhập tay không bị biến thành lỗi ảnh do imageCount=0; prompt khai báo rõ nguồn message_text/ocr_text và parser giữ cờ hợp lệ cho text. Ca OCR chỉ có giao diện rác vẫn có thể là invalid_input.
 
 Lượt thiếu ngữ cảnh tiếp tục không lưu mẫu, scan_logs, phiên chờ hay phản hồi cache. Khi có thêm tin, quét toàn bộ hội thoại như một lượt mới.
 
 ## Kiểm chứng
 
-- `node --test`: 33 ca đạt, gồm 22 ca có sẵn và 11 ca bổ sung.
+- `node --test`: 34 ca đạt, gồm 22 ca có sẵn và 12 ca bổ sung.
 - Ca họp lớp được kiểm tra với 192 tổ hợp phản hồi mô hình giả lập: true/false, các điểm cao/thấp/null, sufficient/insufficient, tách 0/1/5 messages và cờ nhận diện ảnh. Cả 192 giữ thiếu ngữ cảnh, không có điểm và không ghi dữ liệu. Đây là kiểm thử quy tắc hậu xử lý, không phải 192 lần gọi AI thật.
 - Đối chiếu lời mở đầu có thêm OTP/link/APK, tin không dấu, lời nhắc phòng tránh, hẹn họp, cảm ơn, thông tin tuyển dụng đủ/thiếu và đầu vào không phải tin nhắn.
 - `node scripts/evaluate-context.mjs` tái hiện sự dao động trạng thái của mã cũ bằng phản hồi mô hình giả lập.

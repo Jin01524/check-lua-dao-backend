@@ -233,6 +233,7 @@ async function handleCheck(req, res, { v2 = false, continuation = false, signal 
       analysisResult = await analyzeContent({
         textContent: effectiveTextContent,
         imageCount: files.length,
+        hasTypedText: Boolean(textContent),
         platform,
         apiKey: keyObj.key,
         fewShotExamples,
